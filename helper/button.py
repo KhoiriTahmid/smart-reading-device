@@ -23,7 +23,7 @@ _last_state = {
 
 
 def setup_buttons(pi: pigpio.pi) -> None:
-    for pin in [BTN1, BTN2, BTN3, BTN4, BTN5]:
+    for pin in [BTN1, BTN2, BTN3, BTN4, BTN5, BTN6]:
         pi.set_mode(pin, pigpio.INPUT)
         pi.set_pull_up_down(pin, pigpio.PUD_UP)
 
