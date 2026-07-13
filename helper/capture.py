@@ -7,6 +7,22 @@ BASE_DIR   = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 IMAGES_DIR = os.path.join(BASE_DIR, "images")
 os.makedirs(IMAGES_DIR, exist_ok=True)
 
+def find_usb_camera(max_devices=5) -> int:
+    for device in range(max_devices):
+        cap = cv2.VideoCapture(device)
+
+        if not cap.isOpened():
+            cap.release()
+            continue
+
+        ret, frame = cap.read()
+        cap.release()
+
+        if ret and frame is not None:
+            return device
+
+    raise RuntimeError("No USB camera found")
+
 
 def capture_picamera(index: int) -> tuple[str | None, int]:
     output_path = os.path.join(IMAGES_DIR, f"capture_{index}.jpg")
@@ -26,10 +42,11 @@ def capture_picamera(index: int) -> tuple[str | None, int]:
         return None, index + 1
 
 
-def capture_usb(index: int, device: int = 1) -> tuple[str | None, int]:
+def capture_usb(index: int) -> tuple[str | None, int]:
     output_path = os.path.join(IMAGES_DIR, f"capture_{index}.jpg")
     try:
         logging.info(f"Capturing USB Camera → capture_{index}.jpg")
+        device = find_usb_camera()
         cap = cv2.VideoCapture(device)
         if not cap.isOpened():
             logging.error(f"capture_usb: cannot open device {device}")

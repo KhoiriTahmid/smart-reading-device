@@ -43,4 +43,4 @@ def speaker_worker(speaker_queue: queue.Queue) -> None:
             continue
         volume = get_volume()
         logging.info(f"speaker: playing '{name}' vol={volume}")
-        # _play_sound(path, volume)
+        _play_sound(path, volume)

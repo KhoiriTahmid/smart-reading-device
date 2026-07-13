@@ -13,7 +13,7 @@ from helper.fan          import setup_fan, fan_off
 from helper.led          import setup_led, led_on, led_off
 from helper.motor        import setup_motor, motor_worker
 from helper.switch       import setup_switches, read_sw1, read_sw2_language
-from helper.button       import setup_buttons, read_btn1, read_btn2, read_btn3, read_btn4, read_btn5
+from helper.button       import setup_buttons, read_btn1, read_btn2, read_btn3, read_btn4, read_btn5, read_btn6
 from helper.limit_switch import setup_limit_switches, read_limit_sw1, read_limit_sw2
 from helper.ultrasonic   import setup_ultrasonic, read_ultra1, read_ultra2
 from helper.encoder      import setup_encoders, read_encoders, get_tts_speed
@@ -46,8 +46,8 @@ def ultrasonic1_worker(pi: pigpio.pi) -> None:
             # print(f"Ultra1: {distance:.1f}cm")
 
             # slow motor if close
-            if distance < ULTRA1_SLOW_CM:
-                motor_queue.put("slow")
+            # if distance < ULTRA1_SLOW_CM:
+            #     motor_queue.put("slow")
 
             # stuck detection — collect last N readings
             last_distances.append(round(distance, 1))
@@ -119,8 +119,10 @@ def loop(pi: pigpio.pi) -> None:
                 print("Homing: moving backward to limit SW1")
                 motor_queue.put("backward")
             else:
-                # ocr_queue.put("start")
-                print("OCRING")
+                _motor_running = False
+                motor_queue.put("stop")
+                led_on(pi)
+                ocr_queue.put("start")
         elif not sw1 and sw1_last and _motor_running:
             _motor_running = False
             motor_queue.put("stop")
@@ -138,9 +140,8 @@ def loop(pi: pigpio.pi) -> None:
         if limit1 and not limit1_last and _motor_running:
             print("Limit SW1: pressed — stop + OCR")
             motor_queue.put("stop")
-            # led_on(pi)
-            # ocr_queue.put("start")
-            motor_queue.put("forward")
+            led_on(pi)
+            ocr_queue.put("start")
         limit1_last = limit1
 
         # ── Limit SW2: set backward ───────────────────────────────────────
@@ -151,13 +152,15 @@ def loop(pi: pigpio.pi) -> None:
         limit2_last = limit2
 
         # ── Buttons ───────────────────────────────────────────────────────
-        if read_btn1(pi):
-            print("BTN1: restart")
-            _motor_running = False
-            motor_queue.put("stop")
-            time.sleep(0.5)
-            motor_queue.put("backward")
-            _motor_running = True
+        # if read_btn1(pi):
+        #     print("BTN1: restart")
+        #     _motor_running = False
+        #     motor_queue.put("stop")
+        #     time.sleep(0.5)
+        #     motor_queue.put("forward")
+        #     time.sleep(1)
+        #     motor_queue.put("backward")
+        #     _motor_running = True
 
         if read_btn2(pi):
             speaker_queue.put("explain_onoff")
@@ -165,13 +168,16 @@ def loop(pi: pigpio.pi) -> None:
         if read_btn3(pi):
             speaker_queue.put("explain_lang")
 
+        if read_btn6(pi):
+            speaker_queue.put("explain_speed")
+
         if read_btn4(pi):
             speaker_queue.put("explain_volume")
 
-        if read_btn5(pi):
-            motor_queue.put("forward")
-            time.sleep(1)
-            motor_queue.put("backward")
+        # if read_btn5(pi):
+        #     motor_queue.put("forward")
+        #     time.sleep(1)
+        #     motor_queue.put("backward")
 
         # ── Encoders ──────────────────────────────────────────────────────
         read_encoders(pi)

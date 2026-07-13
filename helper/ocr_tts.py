@@ -44,7 +44,7 @@ def ocr_tts_worker(
                 continue
 
             # ── 2. OCR ───────────────────────────────────────────────
-            text = (run_ocr(picam_path, language, 'right') + " " + run_ocr(usb_path, language, 'left')).strip()
+            text = (run_ocr(usb_path, language, 'webcam') + " " + run_ocr(picam_path, language, 'picam')).strip()
             if not text:
                 logging.warning("OCR: empty result")
                 # speaker_queue.put("stuck")
@@ -57,4 +57,4 @@ def ocr_tts_worker(
 
             # ── 4. Motor backward ────────────────────────────────────
             motor_queue.put("forward")
-            logging.info("OCR/TTS done → motor backward")
+            # logging.info("OCR/TTS done → motor backward")

@@ -81,6 +81,7 @@ def speak(text: str, lang: str, volume: int = 50) -> str | None:
 
     filepath = tts_edge(text, lang=lang)
     if filepath:
-        _play(filepath, volume=volume)
+        print(f"filepath tts:{filepath}")
+        # _play(filepath, volume=volume)
 
     return filepath
