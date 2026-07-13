@@ -23,11 +23,11 @@ from helper.switch import (
     read_sw2_language,
 )
 
-# from helper.ultrasonic import (
-#     setup_ultrasonic,
-#     read_ultra1,
-#     read_ultra2,
-# )
+from helper.ultrasonic import (
+    setup_ultrasonic,
+    read_ultra1,
+    read_ultra2,
+)
 
 from helper.encoder import (
     setup_encoders,
@@ -47,7 +47,7 @@ def main():
     setup_buttons(pi)
     setup_limit_switches(pi)
     setup_switches(pi)
-    # setup_ultrasonic(pi)
+    setup_ultrasonic(pi)
     setup_encoders(pi)
 
     print("=== Hardware Test Started ===")
@@ -104,17 +104,17 @@ def main():
                 last_speed = speed
 
             # ---------- Ultrasonic ----------
-            # d1 = read_ultra1(pi)
-            # d2 = read_ultra2(pi)
+            d1 = read_ultra1(pi)
+            d2 = read_ultra2(pi)
 
-            # print(
-            #     f"\rSW1={'ON' if sw1 else 'OFF'} | "
-            #     f"LANG={lang} | "
-            #     f"ULTRA1={d1}cm | "
-            #     f"ULTRA2={d2}cm",
-            #     end="",
-            #     flush=True
-            # )
+            print(
+                f"\rSW1={'ON' if sw1 else 'OFF'} | "
+                f"LANG={lang} | "
+                f"ULTRA1={d1}cm | "
+                f"ULTRA2={d2}cm",
+                end="",
+                flush=True
+            )
 
             time.sleep(0.1)
 

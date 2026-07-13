@@ -20,8 +20,10 @@ def _output_path() -> str:
     return os.path.join(RESULTS_DIR, f"output_{now}.mp3")
 
 
-async def _synthesize(text: str, voice: str, path: str) -> None:
-    communicate = edge_tts.Communicate(text, voice)
+async def _synthesize(text: str, voice: str, path: str, speed: int = 50) -> None:
+    speed = max(0, min(100, speed))
+    rate = f"{speed - 50:+d}%"
+    communicate = edge_tts.Communicate(text, voice, rate)
     await communicate.save(path)
 
 

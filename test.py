@@ -3,9 +3,10 @@ import time
 
 pi = pigpio.pi()
 
-pi.set_mode(19, pigpio.INPUT)
-pi.set_pull_up_down(19, pigpio.PUD_UP)
+pin = 19
+pi.set_mode(pin, pigpio.INPUT)
+pi.set_pull_up_down(pin, pigpio.PUD_UP)
 
 while True:
-    print(pi.read(19))
+    print(pi.read(pin))
     time.sleep(0.1)
