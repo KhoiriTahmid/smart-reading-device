@@ -23,11 +23,18 @@ def _output_path() -> str:
 async def _synthesize(text: str, voice: str, path: str, speed: int = 50) -> None:
     speed = max(0, min(100, speed))
     rate = f"{speed - 50:+d}%"
-    communicate = edge_tts.Communicate(text, voice, rate)
+    rate = f"{speed-50:+d}%"
+
+    communicate = edge_tts.Communicate(
+        text=text,
+        voice=voice,
+        rate=rate,
+    )
+
     await communicate.save(path)
 
 
-def tts_edge(text: str, lang: str = "indonesian") -> str | None:
+def tts_edge(text: str, lang: str = "indonesian", speed: int = 50) -> str | None:
     if not text or not text.strip():
         logging.warning("tts_edge: empty text")
         return None
@@ -36,8 +43,8 @@ def tts_edge(text: str, lang: str = "indonesian") -> str | None:
     path  = _output_path()
 
     try:
-        logging.info(f"Edge TTS — lang={lang} voice={voice} chars={len(text)}")
-        asyncio.run(_synthesize(text, voice, path))
+        logging.info(f"Edge TTS — lang={lang} voice={voice} chars={len(text)} speed={speed}")
+        asyncio.run(_synthesize(text, voice, path, speed))
         logging.info(f"Edge TTS saved: {path}")
         return path
     except Exception as e:

@@ -2,62 +2,100 @@ import pigpio
 import time
 from helper.pins import BTN1, BTN2, BTN3, BTN4, BTN5, BTN6
 
-DEBOUNCE = 0.3  # seconds
+# ------------------------------------------------------------------
+# Debounce config
+# ------------------------------------------------------------------
+DEBOUNCE_MS = 30  # Button must stay stable for 30 ms
 
-_last_time = {
-    BTN1: 0.0,
-    BTN2: 0.0,
-    BTN3: 0.0,
-    BTN4: 0.0,
-    BTN5: 0.0,
-    BTN6: 0.0,
-}
-_last_state = {
-    BTN1: 1,
-    BTN2: 1,
-    BTN3: 1,
-    BTN4: 1,
-    BTN5: 1,
-    BTN6: 1,
-}
+
+class DebouncedButton:
+    """
+    Debounces an active-low push button and returns True only once
+    for each physical press.
+    """
+
+    def __init__(self, pi: pigpio.pi, pin: int, debounce_ms: int = DEBOUNCE_MS):
+        self.pi = pi
+        self.pin = pin
+        self.debounce_s = debounce_ms / 1000.0
+
+        raw = pi.read(pin)
+        self.stable_state = raw
+        self.last_raw = raw
+        self.last_change_time = time.monotonic()
+
+        # Prevent repeated events while button is held
+        self.press_reported = False
+
+    def pressed(self) -> bool:
+        raw = self.pi.read(self.pin)
+        now = time.monotonic()
+
+        # Raw state changed -> restart debounce timer
+        if raw != self.last_raw:
+            self.last_raw = raw
+            self.last_change_time = now
+            return False
+
+        # Raw state has remained stable long enough
+        if (
+            raw != self.stable_state
+            and (now - self.last_change_time) >= self.debounce_s
+        ):
+            self.stable_state = raw
+
+            # Button pressed (active LOW)
+            if raw == 0:
+                if not self.press_reported:
+                    self.press_reported = True
+                    return True
+
+            # Button released
+            else:
+                self.press_reported = False
+
+        return False
+
+
+_buttons: dict[int, DebouncedButton] = {}
 
 
 def setup_buttons(pi: pigpio.pi) -> None:
-    for pin in [BTN1, BTN2, BTN3, BTN4, BTN5, BTN6]:
+    global _buttons
+
+    for pin in (BTN1, BTN2, BTN3, BTN4, BTN5, BTN6):
         pi.set_mode(pin, pigpio.INPUT)
         pi.set_pull_up_down(pin, pigpio.PUD_UP)
 
+        # Ignore electrical glitches shorter than 10 ms
+        pi.set_glitch_filter(pin, 10000)
 
-def _read(pi: pigpio.pi, pin: int) -> bool:
-    """Returns True once per press with 0.3s debounce."""
-    global _last_time, _last_state
-    state = pi.read(pin)
-    now   = time.monotonic()
+        _buttons[pin] = DebouncedButton(pi, pin)
 
-    if state == 0 and _last_state[pin] == 1:  # falling edge = pressed
-        if now - _last_time[pin] > DEBOUNCE:
-            _last_time[pin]  = now
-            _last_state[pin] = state
-            return True
 
-    _last_state[pin] = state
-    return False
+def _read(pin: int) -> bool:
+    return _buttons[pin].pressed()
 
 
 def read_btn1(pi: pigpio.pi) -> bool:
-    return _read(pi, BTN1)
+    return _read(BTN1)
+
 
 def read_btn2(pi: pigpio.pi) -> bool:
-    return _read(pi, BTN2)
+    return _read(BTN2)
+
 
 def read_btn3(pi: pigpio.pi) -> bool:
-    return _read(pi, BTN3)
+    return _read(BTN3)
+
 
 def read_btn4(pi: pigpio.pi) -> bool:
-    return _read(pi, BTN4)
+    return _read(BTN4)
+
 
 def read_btn5(pi: pigpio.pi) -> bool:
-    return _read(pi, BTN5)
+    return _read(BTN5)
+
 
 def read_btn6(pi: pigpio.pi) -> bool:
-    return _read(pi, BTN6)
+    return _read(BTN6)

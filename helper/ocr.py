@@ -51,14 +51,12 @@ def run_ocr(
             img = cv2.warpPerspective(img, matrix, (w, h))
 
         # ==========================================
-        # Camera-specific rotation (same as before)
+        # Camera-specific rotation
         # ==========================================
         if camera == "picam":
-            # old rotate="right"
             img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
 
         elif camera == "webcam":
-            # old rotate="left"
             img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
         # ==========================================
@@ -118,6 +116,9 @@ def run_ocr(
         print(f"\n{'─'*40}")
         print(f"Raw OCR Text  : {text or '(empty)'}")
 
+        # ==========================================
+        # POST-PROCESS
+        # ==========================================
         for i in range(len(data["text"])):
             word = data["text"][i].strip()
             if not word:

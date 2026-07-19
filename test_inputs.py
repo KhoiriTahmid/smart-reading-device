@@ -26,7 +26,6 @@ from helper.switch import (
 from helper.ultrasonic import (
     setup_ultrasonic,
     read_ultra1,
-    read_ultra2,
 )
 
 from helper.encoder import (
@@ -105,13 +104,11 @@ def main():
 
             # ---------- Ultrasonic ----------
             d1 = read_ultra1(pi)
-            d2 = read_ultra2(pi)
 
             print(
                 f"\rSW1={'ON' if sw1 else 'OFF'} | "
                 f"LANG={lang} | "
-                f"ULTRA1={d1}cm | "
-                f"ULTRA2={d2}cm",
+                f"ULTRA1={d1}cm | ",
                 end="",
                 flush=True
             )
