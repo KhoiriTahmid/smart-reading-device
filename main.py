@@ -38,6 +38,8 @@ _page_seen = False
 _page_lock = threading.Lock()
 _resetting = False
 _ready_to_start = False
+_homing_purpose = None   # None | "startup" | "shutdown"
+
 
 # ── Ultrasonic 1 (page detection) ───────────────────────────────────────────
 ULTRA1_INTERVAL = 0.1     # seconds between readings
@@ -216,12 +218,24 @@ def start_threads(pi: pigpio.pi) -> None:
 
 
 def loop(pi: pigpio.pi) -> None:
-    global _language, _motor_running, _resetting, _ready_to_start
+    global _language, _motor_running, _resetting, _ready_to_start, _homing_purpose
 
     sw1_last = False
     sw2_last = False
     limit1_last = False
     limit2_last = False
+
+    # ── Startup: kalau SW1 OFF saat pertama kali run, homing dulu ──────
+    sw1_initial = read_sw1(pi)
+    if not sw1_initial:
+        if not read_limit_sw1(pi):
+            print("Startup: SW1 OFF — homing to limit SW1")
+            _homing_purpose = "startup"
+            motor_queue.put("backward")
+        else:
+            print("Startup: SW1 OFF — already at home")
+            speaker_queue.put("place_book")
+    sw1_last = sw1_initial
 
     while True:
         # ── SW1: on/off ──────────────────────────────────────────────────
@@ -229,19 +243,22 @@ def loop(pi: pigpio.pi) -> None:
         if sw1 and not sw1_last:
             _motor_running = True
             print("SW1: ON")
-            # check limit SW1 — if not pressed, go backward to find home
             if not read_limit_sw1(pi):
                 print("Homing: moving backward to limit SW1")
                 motor_queue.put("backward")
             else:
-                _motor_running = False
                 run_ocr_tts(pi)
-                
+                _motor_running = True
+
         elif not sw1 and sw1_last and _motor_running:
             _motor_running = False
-            speaker_queue.put("shutdown")
-            motor_queue.put("stop")
-            print("SW1: OFF — motor stopped")
+            print("SW1: OFF — homing before shutdown")
+            if not read_limit_sw1(pi):
+                _homing_purpose = "shutdown"
+                motor_queue.put("backward")
+            else:
+                motor_queue.put("stop")
+                speaker_queue.put("shutdown")
         sw1_last = sw1
 
         # ── Language switch ───────────────────────────────────────────────
@@ -254,7 +271,19 @@ def loop(pi: pigpio.pi) -> None:
         # ── Limit SW1: stop + OCR ─────────────────────────────────────────
         limit1 = read_limit_sw1(pi)
         if limit1 and not limit1_last:
-            if _resetting:
+            if _homing_purpose == "startup":
+                print("Startup homing complete")
+                _homing_purpose = None
+                motor_queue.put("stop")
+                speaker_queue.put("place_book")
+
+            elif _homing_purpose == "shutdown":
+                print("Shutdown homing complete")
+                _homing_purpose = None
+                motor_queue.put("stop")
+                speaker_queue.put("shutdown")
+
+            elif _resetting:
                 print("Reset complete")
                 _ready_to_start = True
                 _resetting = False
@@ -337,7 +366,6 @@ def main() -> None:
 
     try:
         setup(pi)
-        speaker_queue.put("place_book")
         start_threads(pi)
         loop(pi)
     except KeyboardInterrupt:

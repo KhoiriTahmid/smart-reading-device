@@ -13,7 +13,6 @@ _rotary2: Rotary | None = None
 
 def _on_volume_change(counter: int) -> None:
     global _volume
-    print("CALLBACK!", counter)
 
     if counter > _volume:
         if _speaker_queue:

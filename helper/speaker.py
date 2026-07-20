@@ -41,11 +41,11 @@ def setup_speaker() -> None:
 
 def _play_sound(path: str, volume: int) -> None:
     ext   = path.rsplit(".", 1)[-1].lower()
-    scale = volume / 100.0
+    scale = int(volume / 100 * 32768)
     cmd = (
-        ["mpg123", "-q", "--scale", str(int(volume / 100 * 32768)), "-a", "default", path]
+        ["mpg123", "-q", "--scale", str(scale), "-a", "default", path]
         if ext == "mp3" else
-        ["pw-play", "--volume", str(scale), path]
+        ["aplay",  "-q", "-D", "default", path]
     )
     try:
         subprocess.run(cmd, check=True, timeout=10)
@@ -53,6 +53,27 @@ def _play_sound(path: str, volume: int) -> None:
         logging.error(f"speaker: playback timed out for {path}")
     except Exception as e:
         logging.error(f"speaker: playback failed: {e}")
+
+def speaker_worker(speaker_queue: queue.Queue, get_language) -> None:
+    while True:
+        name = speaker_queue.get()
+        if name == "quit":
+            break
+
+        filename = SOUNDS.get(name)
+        if filename is None:
+            logging.warning(f"speaker: unknown sound '{name}'")
+            continue
+
+        if name.startswith("beep_"):
+            path = f"sounds/{filename}"
+        else:
+            lang_dir = LANG_DIRS.get(get_language(), DEFAULT_LANG_DIR)
+            path = f"sounds/{lang_dir}/{filename}"
+
+        volume = get_volume()
+        logging.info(f"speaker: playing '{name}' lang={lang_dir} vol={volume}")
+        _play_sound(path, volume)
 
 def speaker_worker(speaker_queue: queue.Queue, get_language) -> None:
     while True:

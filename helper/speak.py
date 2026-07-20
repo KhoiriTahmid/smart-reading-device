@@ -63,7 +63,7 @@ def set_volume(volume: int):
         logging.error(f"set_volume: failed: {e}")
 
 
-def _play(filepath: str, volume: int = 50) -> None:
+def _play(filepath: str, volume: int = 50, min_timeout: int = 15) -> None:
     global _play_process
 
     ext = filepath.rsplit(".", 1)[-1].lower()
@@ -80,19 +80,33 @@ def _play(filepath: str, volume: int = 50) -> None:
 
     set_volume(volume)
 
+    # Estimate playback duration from the actual audio file, so long
+    # TTS clips don't get cut off by a fixed timeout.
+    timeout = min_timeout
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", filepath],
+            capture_output=True, text=True, timeout=5,
+        )
+        duration = float(result.stdout.strip())
+        timeout = max(min_timeout, duration + 10)  # +10s buffer
+    except Exception as e:
+        logging.warning(f"_play: could not probe duration, using default timeout: {e}")
+
     try:
         with _play_lock:
-            # Kill any stuck previous process before starting new playback
             if _play_process is not None and _play_process.poll() is None:
                 logging.warning("_play: killing stuck previous playback process")
                 _play_process.kill()
                 _play_process.wait(timeout=2)
             _play_process = subprocess.Popen(cmd)
 
+        _play_process.wait(timeout=timeout)
         logging.info(f"Playback done: {filepath}")
 
     except subprocess.TimeoutExpired:
-        logging.error(f"_play: playback timed out for {filepath}, killing")
+        logging.error(f"_play: playback timed out ({timeout:.0f}s) for {filepath}, killing")
         with _play_lock:
             if _play_process:
                 _play_process.kill()
@@ -105,7 +119,6 @@ def _play(filepath: str, volume: int = 50) -> None:
     finally:
         with _play_lock:
             _play_process = None
-
 
 def _get_piper_voice(lang: str) -> PiperVoice | None:
     """Lazy-load Piper voice only when actually needed."""
@@ -156,6 +169,15 @@ def speak(*, text: str, lang: str, speaker_queue: queue.Queue, volume: int = 80,
     return filepath
 
 def volume_watcher(get_volume, interval: float = 0.2) -> None:
+    last_volume = None
+    while True:
+        volume = get_volume()
+        if volume != last_volume:
+            set_volume(volume)
+            last_volume = volume
+        time.sleep(interval)
+        
+# def volume_watcher(get_volume, interval: float = 0.2) -> None:
     """
     Syncs system volume to the volume knob, but SKIPS applying amixer
     changes while audio is actively playing, to avoid hardware gain

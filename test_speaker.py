@@ -6,7 +6,7 @@ import subprocess
 import sys
 import time
 
-DEVICE = "plughw:2,0"  # match your speaker's card,device — see list_devices() below
+DEVICE = "default"  # match your speaker's card,device — see list_devices() below
 
 
 def list_devices() -> None:
