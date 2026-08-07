@@ -1,6 +1,10 @@
+import logging
 
 from pigpio_encoder.rotary import Rotary
+
 from helper.pins import ENC1_CLK, ENC1_DT, ENC2_CLK, ENC2_DT
+
+logger = logging.getLogger(__name__)
 
 Rotary.sw_gpio = None
 
@@ -14,41 +18,36 @@ _rotary2: Rotary | None = None
 def _on_volume_change(counter: int) -> None:
     global _volume
 
-    if counter > _volume:
-        if _speaker_queue:
-            _speaker_queue.put("beep_up")
-    elif counter < _volume:
-        if _speaker_queue:
-            _speaker_queue.put("beep_down")
+    if counter > _volume and _speaker_queue:
+        _speaker_queue.put("beep_up")
+    elif counter < _volume and _speaker_queue:
+        _speaker_queue.put("beep_down")
 
     _volume = counter
-    print(f"Volume: {_volume}")
+    logger.info(f"Volume: {_volume}")
 
 
 def _on_tts_speed_change(counter: int) -> None:
     global _tts_speed
 
-    if counter > _tts_speed:
-        if _speaker_queue:
-            _speaker_queue.put("beep_up")
-    elif counter < _tts_speed:
-        if _speaker_queue:
-            _speaker_queue.put("beep_down")
+    if counter > _tts_speed and _speaker_queue:
+        _speaker_queue.put("beep_up")
+    elif counter < _tts_speed and _speaker_queue:
+        _speaker_queue.put("beep_down")
 
     _tts_speed = counter
-    print(f"TTS speed: {_tts_speed}")
+    logger.info(f"TTS speed: {_tts_speed}")
 
 
 def setup_encoders(pi=None, speaker_queue=None):
-    global _rotary1, _rotary2, _speaker_queue
-
-    _speaker_queue = speaker_queue
     """
     `pi` is accepted but unused — pigpio_encoder.Rotary() opens its
     own internal pigpio.pi() connection, so it doesn't reuse an
     existing one. Kept as a param so call sites elsewhere don't break.
     """
-    global _rotary1, _rotary2
+    global _rotary1, _rotary2, _speaker_queue
+
+    _speaker_queue = speaker_queue
 
     _rotary1 = Rotary(clk_gpio=ENC1_CLK, dt_gpio=ENC1_DT)
     _rotary1.setup_rotary(
@@ -77,6 +76,7 @@ def get_volume() -> int:
 
 def get_tts_speed() -> int:
     return _tts_speed
+
 
 def read_encoders(pi=None) -> None:
     """

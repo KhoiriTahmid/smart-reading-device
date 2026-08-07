@@ -4,6 +4,8 @@ import subprocess
 import cv2
 from picamera2 import Picamera2
 
+logger = logging.getLogger(__name__)
+
 BASE_DIR   = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 IMAGES_DIR = os.path.join(BASE_DIR, "images")
 os.makedirs(IMAGES_DIR, exist_ok=True)
@@ -25,7 +27,7 @@ def _find_usb_camera_by_name(name_hint: str = "AF640") -> int | None:
             capture_output=True, text=True, check=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        logging.error(f"find_usb_camera: v4l2-ctl failed: {e}")
+        logger.error(f"find_usb_camera: v4l2-ctl failed: {e}")
         return None
 
     lines = result.stdout.splitlines()
@@ -38,7 +40,7 @@ def _find_usb_camera_by_name(name_hint: str = "AF640") -> int | None:
                 # Take the first video node listed under this device
                 dev_path = line.strip()
                 index = int(dev_path.replace("/dev/video", ""))
-                logging.info(f"find_usb_camera: matched '{current_name}' -> {dev_path}")
+                logger.info(f"find_usb_camera: matched '{current_name}' -> {dev_path}")
                 return index
 
     return None
@@ -59,7 +61,7 @@ def find_usb_camera(max_devices: int = 5) -> int:
     # Fallback: probe, but explicitly request MJPG/a real resolution
     # and use CAP_V4L2 so we don't send a bad default format that
     # unicam chokes on. Still not bulletproof, but better than default.
-    logging.warning("find_usb_camera: name match failed, falling back to probing")
+    logger.warning("find_usb_camera: name match failed, falling back to probing")
     for device in range(max_devices):
         cap = cv2.VideoCapture(device, cv2.CAP_V4L2)
         if not cap.isOpened():
@@ -82,7 +84,7 @@ def find_usb_camera(max_devices: int = 5) -> int:
 def capture_picamera(index: int) -> tuple[str | None, int]:
     output_path = os.path.join(IMAGES_DIR, f"capture_{index}.jpg")
     try:
-        logging.info(f"Capturing Pi Camera → capture_{index}.jpg")
+        logger.info(f"Capturing Pi Camera → capture_{index}.jpg")
         cam    = Picamera2()
         config = cam.create_still_configuration(
             main={"size": (1600, 1200)}   # turun dari 2592x1944 (5MP) ke ~2MP, cukup untuk OCR teks buku
@@ -92,21 +94,21 @@ def capture_picamera(index: int) -> tuple[str | None, int]:
         cam.capture_file(output_path)
         cam.stop()
         cam.close()
-        logging.info(f"Pi Camera done: {output_path}")
+        logger.info(f"Pi Camera done: {output_path}")
         return output_path, index + 1
     except Exception as e:
-        logging.error(f"capture_picamera: {e}", exc_info=True)
+        logger.error(f"capture_picamera: {e}", exc_info=True)
         return None, index + 1
 
 
 def capture_usb(index: int) -> tuple[str | None, int]:
     output_path = os.path.join(IMAGES_DIR, f"capture_{index}.jpg")
     try:
-        logging.info(f"Capturing USB Camera → capture_{index}.jpg")
+        logger.info(f"Capturing USB Camera → capture_{index}.jpg")
         device = find_usb_camera()
         cap = cv2.VideoCapture(device, cv2.CAP_V4L2)
         if not cap.isOpened():
-            logging.error(f"capture_usb: cannot open device {device}")
+            logger.error(f"capture_usb: cannot open device {device}")
             return None, index + 1
 
         cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
@@ -121,14 +123,14 @@ def capture_usb(index: int) -> tuple[str | None, int]:
         cap.release()
 
         if not ret or frame is None:
-            logging.error("capture_usb: failed to read frame")
+            logger.error("capture_usb: failed to read frame")
             return None, index + 1
 
         cv2.imwrite(output_path, frame)
-        logging.info(f"USB Camera done: {output_path}")
+        logger.info(f"USB Camera done: {output_path}")
         return output_path, index + 1
     except Exception as e:
-        logging.error(f"capture_usb: {e}", exc_info=True)
+        logger.error(f"capture_usb: {e}", exc_info=True)
         return None, index + 1
 
 

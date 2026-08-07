@@ -10,6 +10,8 @@ from helper.tts_edge          import tts_edge
 from helper.tts_piper          import tts_piper
 from helper.is_wifi_connected import is_wifi_connected
 
+logger = logging.getLogger(__name__)
+
 _play_lock    = threading.Lock()
 _play_process: subprocess.Popen | None = None
 
@@ -19,8 +21,6 @@ MODEL_EN = os.path.join(BASE_DIR, "voices", "en_US-lessac-medium.onnx")
 MODEL_ID = os.path.join(BASE_DIR, "voices", "id_ID-news_tts-medium.onnx")
 
 PIPER_VOICES: dict[str, PiperVoice] = {}
-# PIPER_VOICES["english"] = PiperVoice.load(MODEL_EN)
-# PIPER_VOICES["indonesian"] = PiperVoice.load(MODEL_ID)
 
 
 def stop_playback() -> None:
@@ -29,11 +29,12 @@ def stop_playback() -> None:
     with _play_lock:
         if _play_process and _play_process.poll() is None:
             _play_process.terminate()
-            logging.info("Playback stopped")
+            logger.info("Playback stopped")
 
 
 ALSA_CARD = "2"
 ALSA_CONTROL = "PCM"
+ALSA_DEVICE = "plughw:CARD=Headphones,DEV=0"
 
 PCM_MIN_DB = -30.0
 PCM_MAX_DB = 4.0
@@ -58,9 +59,9 @@ def set_volume(volume: int):
         ], check=True, timeout=2)
         _last_set_volume = volume
     except subprocess.TimeoutExpired:
-        logging.error("set_volume: amixer timed out")
-    except Exception as e:
-        logging.error(f"set_volume: failed: {e}")
+        logger.error("set_volume: amixer timed out")
+    except Exception:
+        logger.exception("set_volume: failed")
 
 
 def _play(filepath: str, volume: int = 50, min_timeout: int = 15) -> None:
@@ -69,13 +70,13 @@ def _play(filepath: str, volume: int = 50, min_timeout: int = 15) -> None:
     ext = filepath.rsplit(".", 1)[-1].lower()
 
     player_map = {
-        "wav": ["aplay",  "-q", "-D", "default", filepath],
-        "mp3": ["mpg123", "-q", "-a", "default", filepath],
+        "wav": ["aplay",  "-q", "-D", ALSA_DEVICE, filepath],
+        "mp3": ["mpg123", "-q", "-o", "alsa", "-a", ALSA_DEVICE, filepath],
     }
 
     cmd = player_map.get(ext)
     if not cmd:
-        logging.error(f"_play: unsupported extension '.{ext}'")
+        logger.error(f"_play: unsupported extension '.{ext}'")
         return
 
     set_volume(volume)
@@ -92,50 +93,51 @@ def _play(filepath: str, volume: int = 50, min_timeout: int = 15) -> None:
         duration = float(result.stdout.strip())
         timeout = max(min_timeout, duration + 10)  # +10s buffer
     except Exception as e:
-        logging.warning(f"_play: could not probe duration, using default timeout: {e}")
+        logger.warning(f"_play: could not probe duration, using default timeout: {e}")
 
     try:
         with _play_lock:
             if _play_process is not None and _play_process.poll() is None:
-                logging.warning("_play: killing stuck previous playback process")
+                logger.warning("_play: killing stuck previous playback process")
                 _play_process.kill()
                 _play_process.wait(timeout=2)
             _play_process = subprocess.Popen(cmd)
 
         _play_process.wait(timeout=timeout)
-        logging.info(f"Playback done: {filepath}")
+        logger.info(f"Playback done: {filepath}")
 
     except subprocess.TimeoutExpired:
-        logging.error(f"_play: playback timed out ({timeout:.0f}s) for {filepath}, killing")
+        logger.error(f"_play: playback timed out ({timeout:.0f}s) for {filepath}, killing")
         with _play_lock:
             if _play_process:
                 _play_process.kill()
     except FileNotFoundError:
         player = cmd[0]
         pkg    = "alsa-utils" if player == "aplay" else "mpg123"
-        logging.error(f"{player} not found — install: sudo apt install {pkg}")
-    except Exception as e:
-        logging.error(f"Playback failed: {e}", exc_info=True)
+        logger.error(f"{player} not found — install: sudo apt install {pkg}")
+    except Exception:
+        logger.exception("Playback failed")
     finally:
         with _play_lock:
             _play_process = None
+
 
 def _get_piper_voice(lang: str) -> PiperVoice | None:
     """Lazy-load Piper voice only when actually needed."""
     if lang not in PIPER_VOICES:
         model_path = MODEL_EN if lang == "english" else MODEL_ID
-        logging.info(f"Loading Piper voice for '{lang}' (first use)...")
+        logger.info(f"Loading Piper voice for '{lang}' (first use)...")
         try:
             PIPER_VOICES[lang] = PiperVoice.load(model_path)
-        except Exception as e:
-            logging.error(f"Failed to load Piper voice for '{lang}': {e}", exc_info=True)
+        except Exception:
+            logger.exception(f"Failed to load Piper voice for '{lang}'")
             return None
     return PIPER_VOICES[lang]
 
 
 def speak(*, text: str, lang: str, speaker_queue: queue.Queue, volume: int = 80, speed: int = 50) -> str | None:
     if not text or not text.strip():
-        logging.warning("speak: empty text")
+        logger.warning("speak: empty text")
         return None
 
     speaker_queue.put("start_tts")
@@ -144,29 +146,30 @@ def speak(*, text: str, lang: str, speaker_queue: queue.Queue, volume: int = 80,
 
     # ── Try Edge TTS first if WiFi is available ─────────────────────
     if is_wifi_connected():
-        logging.info("speak: WiFi available → trying Edge TTS")
+        logger.info("speak: WiFi available → trying Edge TTS")
         filepath = tts_edge(text, lang, speed)
         if filepath is None:
-            logging.warning("speak: Edge TTS failed → falling back to Piper")
+            logger.warning("speak: Edge TTS failed → falling back to Piper")
     else:
-        logging.info("speak: No WiFi → Piper (offline)")
+        logger.info("speak: No WiFi → Piper (offline)")
 
     # ── Fallback to Piper if Edge TTS unavailable or failed ─────────
     if filepath is None:
         piper_voice = _get_piper_voice(lang)
         if piper_voice is None:
-            logging.error(f"speak: no Piper voice available for lang='{lang}', giving up")
+            logger.error(f"speak: no Piper voice available for lang='{lang}', giving up")
             return None
         filepath = tts_piper(text, lang, speed)
 
     if filepath:
-        print(f"filepath tts:{filepath}")
+        logger.info(f"filepath tts:{filepath}")
         _play(filepath, volume=volume)
     else:
-        print("gagal tts — both Edge and Piper failed")
+        logger.error("gagal tts — both Edge and Piper failed")
         speaker_queue.put("tts_failed")
 
     return filepath
+
 
 def volume_watcher(get_volume, interval: float = 0.2) -> None:
     last_volume = None
@@ -175,30 +178,4 @@ def volume_watcher(get_volume, interval: float = 0.2) -> None:
         if volume != last_volume:
             set_volume(volume)
             last_volume = volume
-        time.sleep(interval)
-        
-# def volume_watcher(get_volume, interval: float = 0.2) -> None:
-    """
-    Syncs system volume to the volume knob, but SKIPS applying amixer
-    changes while audio is actively playing, to avoid hardware gain
-    changes corrupting the live stream (causes pitch/chipmunk distortion).
-    The pending volume gets applied as soon as playback finishes.
-    """
-    last_volume = None
-    pending_volume = None
-
-    while True:
-        volume = get_volume()
-
-        if volume != last_volume:
-            pending_volume = volume
-
-        # Only touch the hardware mixer if nothing is currently playing
-        is_playing = _play_process is not None and _play_process.poll() is None
-
-        if pending_volume is not None and not is_playing:
-            set_volume(pending_volume)
-            last_volume = pending_volume
-            pending_volume = None
-
         time.sleep(interval)

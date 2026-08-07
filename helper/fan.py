@@ -1,5 +1,9 @@
+import logging
+
 import pigpio
 from helper.pins import FAN
+
+logger = logging.getLogger(__name__)
 
 
 def setup_fan(pi: pigpio.pi) -> None:
@@ -8,10 +12,10 @@ def setup_fan(pi: pigpio.pi) -> None:
 
 
 def fan_on(pi: pigpio.pi) -> None:
-    print("Fan ONN")
+    logger.info("Fan on")
     pi.write(FAN, pigpio.HIGH)
 
 
 def fan_off(pi: pigpio.pi) -> None:
-    print("Fan Off")
+    logger.info("Fan off")
     pi.write(FAN, pigpio.LOW)

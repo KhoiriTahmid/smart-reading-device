@@ -1,3 +1,4 @@
+import logging
 import pigpio
 import time
 import threading
@@ -5,6 +6,8 @@ import queue
 
 from helper.pins import IN3, IN4, ENB
 from helper.fan import fan_on, fan_off
+
+logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────
 PWM_FREQUENCY   = 1000
@@ -46,11 +49,11 @@ def _set_direction(pi: pigpio.pi, forward: bool) -> None:
     if forward:
         pi.write(IN3, pigpio.LOW)
         pi.write(IN4, pigpio.HIGH)
-        print("Direction: Forward")
+        logger.info("Direction: Forward")
     else:
         pi.write(IN3, pigpio.HIGH)
         pi.write(IN4, pigpio.LOW)
-        print("Direction: Backward")
+        logger.info("Direction: Backward")
 
 
 def setup_motor(pi: pigpio.pi) -> None:
@@ -59,7 +62,7 @@ def setup_motor(pi: pigpio.pi) -> None:
     pi.set_PWM_frequency(ENB, PWM_FREQUENCY)   # set frekuensi software PWM
     pi.set_PWM_dutycycle(ENB, 0)               # pastikan mulai dari 0
     _set_direction(pi, forward=True)
-    print("Motor initialised")
+    logger.info("Motor initialised")
 
 
 def _ramp_worker(pi: pigpio.pi, start_speed: int, target_speed: int, cancel_event: threading.Event) -> None:
@@ -73,7 +76,7 @@ def _ramp_worker(pi: pigpio.pi, start_speed: int, target_speed: int, cancel_even
         time.sleep(step_delay)
 
     if not cancel_event.is_set():
-        print(f"Motor: ramp complete ({target_speed}/255)")
+        logger.info(f"Motor: ramp complete ({target_speed}/255)")
 
 
 def motor_worker(pi: pigpio.pi, motor_queue: queue.Queue) -> None:
@@ -87,14 +90,14 @@ def motor_worker(pi: pigpio.pi, motor_queue: queue.Queue) -> None:
         current = get_motor_direction()
 
         if current == "stopped":
-            print("Motor: cannot bounce while stopped")
+            logger.info("Motor: cannot bounce while stopped")
             return
 
         motor_idle.clear()
 
         opposite = "backward" if current == "forward" else "forward"
 
-        print(f"Motor: bounce ({current} -> {opposite})")
+        logger.info(f"Motor: bounce ({current} -> {opposite})")
 
         _set_direction(pi, forward=(opposite == "forward"))
         pi.set_PWM_dutycycle(ENB, _duty(RAMP_START_SPEED))
@@ -102,7 +105,7 @@ def motor_worker(pi: pigpio.pi, motor_queue: queue.Queue) -> None:
 
         time.sleep(BOUNCE_DURATION)
 
-        print(f"Motor: returning to {current}")
+        logger.info(f"Motor: returning to {current}")
 
         _set_direction(pi, forward=(current == "forward"))
         pi.set_PWM_dutycycle(ENB, _duty(RAMP_START_SPEED))
@@ -127,6 +130,7 @@ def motor_worker(pi: pigpio.pi, motor_queue: queue.Queue) -> None:
         threading.Thread(
             target=_ramp_worker,
             args=(pi, start_speed, target_speed, ramp_cancel),
+            name="motor_ramp",
             daemon=True,
         ).start()
 
@@ -137,10 +141,10 @@ def motor_worker(pi: pigpio.pi, motor_queue: queue.Queue) -> None:
         if hard:
             pi.write(IN3, pigpio.LOW)
             pi.write(IN4, pigpio.LOW)
-        fan_off(pi)
+        # fan_off(pi)
         _set_motor_direction("stopped")
         motor_idle.set()
-        print("Motor: hard stop" if hard else "Motor: stop")
+        logger.info("Motor: hard stop" if hard else "Motor: stop")
 
     def drive(forward: bool) -> None:
         cancel_timer()
@@ -148,10 +152,10 @@ def motor_worker(pi: pigpio.pi, motor_queue: queue.Queue) -> None:
         motor_idle.clear()
         _set_direction(pi, forward=forward)
         pi.set_PWM_dutycycle(ENB, _duty(RAMP_START_SPEED))
-        if(not forward):
+        if not forward:
             fan_off(pi)
         _set_motor_direction("forward" if forward else "backward")
-        print(f"Motor: {'forward' if forward else 'backward'}, ramping {RAMP_START_SPEED} -> {FULL_SPEED}")
+        logger.info(f"Motor: {'forward' if forward else 'backward'}, ramping {RAMP_START_SPEED} -> {FULL_SPEED}")
         start_ramp(RAMP_START_SPEED, FULL_SPEED)
 
     while True:
@@ -160,20 +164,20 @@ def motor_worker(pi: pigpio.pi, motor_queue: queue.Queue) -> None:
         except queue.Empty:
             continue
 
-        print(f"Motor cmd: {cmd}")
+        logger.info(f"Motor cmd: {cmd}")
 
         if cmd == "full":
             cancel_timer()
             cancel_ramp()
             pi.set_PWM_dutycycle(ENB, _duty(FULL_SPEED))
-            print(f"Motor: full ({FULL_SPEED}/255)")
+            logger.info(f"Motor: full ({FULL_SPEED}/255)")
 
         elif cmd == "slow":
             cancel_timer()
             cancel_ramp()
             fan_on(pi)
             pi.set_PWM_dutycycle(ENB, _duty(SLOW_SPEED))
-            print(f"Motor: slow ({SLOW_SPEED}/255)")
+            logger.info(f"Motor: slow ({SLOW_SPEED}/255)")
             slow_timer = threading.Timer(SLOW_DURATION, lambda: motor_queue.put("full"))
             slow_timer.daemon = True
             slow_timer.start()

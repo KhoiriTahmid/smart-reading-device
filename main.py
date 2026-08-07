@@ -8,6 +8,10 @@ import time
 
 import pigpio
 
+import logging
+import os
+from logging.handlers import RotatingFileHandler
+
 from queues import motor_queue, ocr_queue, speaker_queue
 
 from helper.button import (
@@ -30,6 +34,25 @@ from helper.speaker import setup_speaker, speaker_worker
 from helper.switch import setup_switches, read_sw1, read_sw2_language
 from helper.ultrasonic import setup_ultrasonic, read_ultra1
 
+# ── State ─────────────────────────────────────────────────────────────────
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, "reader.log")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(threadName)s] %(name)s: %(levelname)s: %(message)s",
+    handlers=[
+        RotatingFileHandler(
+            LOG_FILE,
+            maxBytes=5 * 1024 * 1024,   # 5 MB per file
+            backupCount=3,              # keep 3 old files: reader.log.1, .2, .3
+        ),
+        logging.StreamHandler(),        # still prints to console too
+    ],
+)
+
+logger = logging.getLogger(__name__)
 
 # ── State ─────────────────────────────────────────────────────────────────
 _language = "indonesian"
@@ -39,6 +62,7 @@ _page_lock = threading.Lock()
 _resetting = False
 _ready_to_start = False
 _homing_purpose = None   # None | "startup" | "shutdown"
+_cancel_scan = threading.Event()
 
 
 # ── Ultrasonic 1 (page detection) ───────────────────────────────────────────
@@ -76,7 +100,7 @@ def ultrasonic1_worker(pi: pigpio.pi) -> None:
             and get_motor_direction() == "forward"
             and distance < PAGE_DETECTED_CM
         ):
-            print(f"page detected {distance}")
+            logger.info(f"page detected {distance}")
             set_page_seen(True)
             fan_off(pi)
 
@@ -181,6 +205,7 @@ def ultrasonic1_worker(pi: pigpio.pi) -> None:
 #         time.sleep(ULTRA2_INTERVAL)
 
 def run_ocr_tts(pi: pigpio.pi):
+    _cancel_scan.clear()
     motor_queue.put("stop")
     led_on(pi)
     ocr_queue.put("start")
@@ -196,25 +221,24 @@ def setup(pi: pigpio.pi) -> None:
     setup_encoders(pi)
     setup_speaker()
     setup_led(pi)
-    print("System ready")
+    logger.info("System ready")
 
 
 def start_threads(pi: pigpio.pi) -> None:
     threads = [
-        threading.Thread(target=motor_worker, args=(pi, motor_queue), daemon=True),
-        threading.Thread(target=ultrasonic1_worker, args=(pi,), daemon=True),
-        # threading.Thread(target=ultrasonic2_worker, args=(pi,), daemon=True),
+        threading.Thread(target=motor_worker, args=(pi, motor_queue), name="motor_worker", daemon=True),
+        threading.Thread(target=ultrasonic1_worker, args=(pi,), name="ultrasonic1_worker", daemon=True),
         threading.Thread(
             target=ocr_tts_worker,
-            args=(ocr_queue, motor_queue, speaker_queue, get_language, get_volume, get_tts_speed, pi),
-            daemon=True,
+            args=(ocr_queue, motor_queue, speaker_queue, get_language, get_volume, get_tts_speed, pi, _cancel_scan),
+            name="ocr_tts_worker", daemon=True,
         ),
-        threading.Thread(target=speaker_worker, args=(speaker_queue, get_language), daemon=True),
-        threading.Thread(target=volume_watcher, args=(get_volume,), daemon=True),
+        threading.Thread(target=speaker_worker, args=(speaker_queue, get_language), name="speaker_worker", daemon=True),
+        threading.Thread(target=volume_watcher, args=(get_volume,), name="volume_watcher", daemon=True),
     ]
     for t in threads:
         t.start()
-    print("All threads started")
+    logger.info("All threads started")
 
 
 def loop(pi: pigpio.pi) -> None:
@@ -229,11 +253,11 @@ def loop(pi: pigpio.pi) -> None:
     sw1_initial = read_sw1(pi)
     if not sw1_initial:
         if not read_limit_sw1(pi):
-            print("Startup: SW1 OFF — homing to limit SW1")
+            logger.info("Startup: SW1 OFF — homing to limit SW1")
             _homing_purpose = "startup"
             motor_queue.put("backward")
         else:
-            print("Startup: SW1 OFF — already at home")
+            logger.info("Startup: SW1 OFF — already at home")
             speaker_queue.put("place_book")
     sw1_last = sw1_initial
 
@@ -242,9 +266,9 @@ def loop(pi: pigpio.pi) -> None:
         sw1 = read_sw1(pi)
         if sw1 and not sw1_last:
             _motor_running = True
-            print("SW1: ON")
+            logger.info("SW1: ON")
             if not read_limit_sw1(pi):
-                print("Homing: moving backward to limit SW1")
+                logger.info("Homing: moving backward to limit SW1")
                 motor_queue.put("backward")
             else:
                 run_ocr_tts(pi)
@@ -252,7 +276,8 @@ def loop(pi: pigpio.pi) -> None:
 
         elif not sw1 and sw1_last and _motor_running:
             _motor_running = False
-            print("SW1: OFF — homing before shutdown")
+            _cancel_scan.set()
+            logger.info("SW1: OFF — homing before shutdown")
             if not read_limit_sw1(pi):
                 _homing_purpose = "shutdown"
                 motor_queue.put("backward")
@@ -264,7 +289,7 @@ def loop(pi: pigpio.pi) -> None:
         # ── Language switch ───────────────────────────────────────────────
         _language = read_sw2_language(pi)
         if _language != sw2_last:
-            print("Language:", _language)
+            logger.info(f"Language: {_language}")
             speaker_queue.put(f"language_{_language}")
         sw2_last = _language
 
@@ -272,19 +297,19 @@ def loop(pi: pigpio.pi) -> None:
         limit1 = read_limit_sw1(pi)
         if limit1 and not limit1_last:
             if _homing_purpose == "startup":
-                print("Startup homing complete")
+                logger.info("Startup homing complete")
                 _homing_purpose = None
                 motor_queue.put("stop")
                 speaker_queue.put("place_book")
 
             elif _homing_purpose == "shutdown":
-                print("Shutdown homing complete")
+                logger.info("Shutdown homing complete")
                 _homing_purpose = None
                 motor_queue.put("stop")
                 speaker_queue.put("shutdown")
 
             elif _resetting:
-                print("Reset complete")
+                logger.info("Reset complete")
                 _ready_to_start = True
                 _resetting = False
                 _motor_running = False
@@ -293,58 +318,58 @@ def loop(pi: pigpio.pi) -> None:
                 set_page_seen(False)
 
             elif _motor_running and get_motor_direction() == "backward":
-                print("Limit SW1: pressed — stop + OCR")
+                logger.info("Limit SW1: pressed — stop + OCR")
                 run_ocr_tts(pi)
         limit1_last = limit1
 
         # ── Limit SW2: set backward ───────────────────────────────────────
         limit2 = read_limit_sw2(pi)
         if limit2 and not limit2_last:
-            print(f"DEBUG: {_motor_running} {get_motor_direction()}")
+            logger.debug(f"{_motor_running} {get_motor_direction()}")
         if limit2 and not limit2_last and _motor_running and get_motor_direction() == "forward":
             if get_page_seen():
-                print("Page flip: SUCCESS")
+                logger.info("Page flip: SUCCESS")
                 speaker_queue.put("page_success")
             else:
-                print("Page flip: FAILED")
+                logger.info("Page flip: FAILED")
                 speaker_queue.put("page_failed")
 
             set_page_seen(False)
-            print("Limit SW2: pressed — going backward")
+            logger.info("Limit SW2: pressed — going backward")
             motor_queue.put("backward")
         limit2_last = limit2
 
         # ── Buttons ───────────────────────────────────────────────────────
         if read_btn1(pi):
-            print("BTN1: explain on/off")
+            logger.info("BTN1: explain on/off")
             speaker_queue.put("explain_onoff")
 
         if read_btn2(pi):
-            print("BTN2: explain restart")
+            logger.info("BTN2: explain restart")
             speaker_queue.put("explain_restart")
 
         if read_btn3(pi):
-            print("BTN3: explain language")
+            logger.info("BTN3: explain language")
             speaker_queue.put("explain_lang")
 
         if read_btn6(pi):
-            print("BTN6: explain speed")
+            logger.info("BTN6: explain speed")
             speaker_queue.put("explain_speed")
 
         if read_btn4(pi):
-            print("BTN4: explain volume")
+            logger.info("BTN4: explain volume")
             speaker_queue.put("explain_volume")
 
         if read_btn5(pi):
             if _ready_to_start:
                 # klik ke-2: mulai scan (sama kayak SW1 pas limit1 udah kepencet)
-                print("BTN5: start scan")
+                logger.info("BTN5: start scan")
                 _ready_to_start = False
                 run_ocr_tts(pi)
                 _motor_running = True
 
             elif not _resetting:
-                print("BTN5: reset")
+                logger.info("BTN5: reset")
                 speaker_queue.put("start_restart")
                 _resetting = True
 
@@ -369,7 +394,7 @@ def main() -> None:
         start_threads(pi)
         loop(pi)
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        logger.info("Shutting down...")
     finally:
         motor_queue.put("hard_stop")
         speaker_queue.put("quit")
@@ -379,7 +404,7 @@ def main() -> None:
         led_off(pi)
         pi.write(26, 0)   # force FAN pin LOW directly as backup
         pi.stop()
-        print("GPIO released. Bye.")
+        logger.info("GPIO released. Bye.")
 
 
 if __name__ == "__main__":

@@ -2,9 +2,7 @@ import pigpio
 import time
 from helper.pins import SW1, SW2
 
-# ------------------------------------------------------------------
-# Debounce config
-# ------------------------------------------------------------------
+# ── Debounce config ──────────────────────────────────────────────────────
 DEBOUNCE_MS = 50  # minimum stable time before accepting a state change
 
 

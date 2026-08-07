@@ -5,6 +5,8 @@ import numpy as np
 import pytesseract
 from pytesseract import Output
 
+logger = logging.getLogger(__name__)
+
 
 def run_ocr(
     image_path: str,
@@ -98,7 +100,7 @@ def run_ocr(
         )
 
         cv2.imwrite(debug_path, ocr_img)
-        logging.info(f"Cleaned image saved → {debug_path}")
+        logger.info(f"Cleaned image saved → {debug_path}")
 
         # ==========================================
         # OCR
@@ -113,8 +115,8 @@ def run_ocr(
         filtered_words = []
         text = " ".join(data["text"])
 
-        print(f"\n{'─'*40}")
-        print(f"Raw OCR Text  : {text or '(empty)'}")
+        logger.info(f"\n{'─'*40}")
+        logger.info(f"Raw OCR Text  : {text or '(empty)'}")
 
         # ==========================================
         # POST-PROCESS
@@ -134,17 +136,16 @@ def run_ocr(
 
         result = " ".join(filtered_words)
 
+        result = result.replace("- ", "")
+        result = result.replace("| ", "")
 
-        result = result.replace("- ","")
-        result = result.replace("| ","")
-
-        print(f"  Image : {base_name}{camera_tag}")
-        print(f"  Lang  : {tess_lang} | Words: {len(filtered_words)}")
-        print(f"  Text  : {result or '(empty)'}")
-        print(f"{'─'*40}\n")
-        logging.info(f"OCR done — {len(filtered_words)} words")
+        logger.info(f"  Image : {base_name}{camera_tag}")
+        logger.info(f"  Lang  : {tess_lang} | Words: {len(filtered_words)}")
+        logger.info(f"  Text  : {result or '(empty)'}")
+        logger.info(f"{'─'*40}\n")
+        logger.info(f"OCR done — {len(filtered_words)} words")
         return result
 
-    except Exception as e:
-        logging.error(f"OCR error: {e}", exc_info=True)
+    except Exception:
+        logger.exception("OCR error")
         return ""
