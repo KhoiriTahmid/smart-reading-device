@@ -1,0 +1,15 @@
+services:
+  smart-reading-device:
+    build:
+      context: .
+      dockerfile: Dockerfile.sim
+    container_name: smart-reading-device-sim
+    network_mode: "host"
+    stdin_open: true # Keep STDIN open for interactive controls
+    tty: true        # Allocate a pseudo-TTY
+    environment:
+      - BACKEND_HTTP_URL=http://localhost:3001
+      - BACKEND_WS_URL=ws://localhost:3001/ws
+      - DEVICE_SERIAL=${DEVICE_SERIAL:-SR-RPI4-001}
+      - DEVICE_API_KEY=${DEVICE_API_KEY:-}
+    restart: unless-stopped

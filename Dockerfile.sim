@@ -1,0 +1,28 @@
+FROM python:3.11-slim
+
+# Install system utilities and fonts (for OCR text image rendering)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-dejavu-core \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy requirement definitions
+COPY requirements-sim.txt /app/requirements-sim.txt
+
+# Install python dependencies in isolated container environment
+RUN pip install --no-cache-dir -r requirements-sim.txt
+
+# Copy device source code
+COPY . /app
+
+# Environment variables with sensible defaults for host networking
+ENV PYTHONUNBUFFERED=1
+ENV BACKEND_HTTP_URL=http://localhost:3001
+ENV BACKEND_WS_URL=ws://localhost:3001/ws
+ENV DEVICE_SERIAL=SR-RPI4-001
+ENV DEVICE_API_KEY=""
+
+CMD ["python3", "sim_runner.py"]

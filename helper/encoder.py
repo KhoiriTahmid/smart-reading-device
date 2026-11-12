@@ -74,8 +74,24 @@ def get_volume() -> int:
     return _volume
 
 
+def set_encoder_volume(val: int) -> None:
+    global _volume
+    _volume = max(0, min(100, int(val)))
+    if _rotary1 is not None:
+        _rotary1.counter = _volume
+    logger.info(f"Volume set remotely: {_volume}")
+
+
 def get_tts_speed() -> int:
     return _tts_speed
+
+
+def set_encoder_speed(val: int) -> None:
+    global _tts_speed
+    _tts_speed = max(0, min(100, int(val)))
+    if _rotary2 is not None:
+        _rotary2.counter = _tts_speed
+    logger.info(f"TTS speed set remotely: {_tts_speed}")
 
 
 def read_encoders(pi=None) -> None:

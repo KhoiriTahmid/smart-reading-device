@@ -1,0 +1,11 @@
+# Dependencies to run simulate.py on a laptop (no Raspberry Pi hardware needed).
+# Pi-only libraries (pigpio, pigpio_encoder, picamera2, board, busio,
+# adafruit_vl53l0x, piper) are replaced by fakes in sim/fakes.py.
+opencv-python-headless
+numpy
+pillow
+requests
+psutil
+websocket-client
+pytesseract   # local OCR fallback only (also needs the `tesseract` binary)
+edge-tts      # local TTS fallback only (needs internet)

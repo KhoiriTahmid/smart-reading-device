@@ -1,6 +1,7 @@
 import os
 import math
 import time
+import signal
 import logging
 import subprocess
 import threading
@@ -30,6 +31,28 @@ def stop_playback() -> None:
         if _play_process and _play_process.poll() is None:
             _play_process.terminate()
             logger.info("Playback stopped")
+
+
+def pause_playback() -> None:
+    """Pause the current playback process via SIGSTOP."""
+    with _play_lock:
+        if _play_process and _play_process.poll() is None:
+            try:
+                _play_process.send_signal(signal.SIGSTOP)
+                logger.info("Playback paused")
+            except Exception:
+                logger.exception("Failed to pause playback")
+
+
+def resume_playback() -> None:
+    """Resume the current playback process via SIGCONT."""
+    with _play_lock:
+        if _play_process and _play_process.poll() is None:
+            try:
+                _play_process.send_signal(signal.SIGCONT)
+                logger.info("Playback resumed")
+            except Exception:
+                logger.exception("Failed to resume playback")
 
 
 ALSA_CARD = "2"
