@@ -14,9 +14,15 @@ from helper.ocr import run_ocr
 from helper.speak import speak, _play
 from helper.fan import fan_on
 from helper.led import led_off
-from helper.cloud_client import send_state_update, get_preferred_lang
+from helper.cloud_client import (
+    send_state_update,
+    get_preferred_lang,
+    load_dotenv_file,
+)
 
 logger = logging.getLogger(__name__)
+
+load_dotenv_file()
 
 BACKEND_HTTP_URL = os.getenv("BACKEND_HTTP_URL", "http://localhost:3001")
 DEVICE_SERIAL = os.getenv("DEVICE_SERIAL", "SR-RPI4-001")
@@ -187,21 +193,22 @@ def process_via_cloud(
 
                         send_state_update(mode="reading", page=int(page_num))
 
+                        played_cloud_audio = False
                         if page_audio_url:
                             logger.info(
                                 f"Playing cloud TTS audio for Page {page_num}"
                             )
                             audio_bin = requests.get(page_audio_url, timeout=20)
-                            ext = (
-                                "wav"
-                                if ".wav" in page_audio_url.lower()
-                                else "mp3"
-                            )
-                            tmp_audio = f"/tmp/cloud_tts_p{page_num}.{ext}"
-                            with open(tmp_audio, "wb") as af:
-                                af.write(audio_bin.content)
-                            _play(tmp_audio, volume=volume)
-                        elif page_text:
+                            if audio_bin.ok and len(audio_bin.content) > 100:
+                                url_path = page_audio_url.lower().split("?")[0]
+                                ext = "wav" if url_path.endswith(".wav") else "mp3"
+                                tmp_audio = f"/tmp/cloud_tts_p{page_num}.{ext}"
+                                with open(tmp_audio, "wb") as af:
+                                    af.write(audio_bin.content)
+                                _play(tmp_audio, volume=volume)
+                                played_cloud_audio = True
+
+                        if not played_cloud_audio and page_text:
                             logger.info(
                                 f"Cloud audio missing for Page {page_num}, speaking text locally"
                             )
@@ -219,13 +226,15 @@ def process_via_cloud(
                 extracted_text = status_data.get("extractedText", "")
                 if audio_url:
                     audio_bin = requests.get(audio_url, timeout=20)
-                    ext = "wav" if ".wav" in audio_url.lower() else "mp3"
-                    tmp_audio = f"/tmp/cloud_tts.{ext}"
-                    with open(tmp_audio, "wb") as af:
-                        af.write(audio_bin.content)
-                    _play(tmp_audio, volume=volume)
-                    return True
-                elif extracted_text:
+                    if audio_bin.ok and len(audio_bin.content) > 100:
+                        url_path = audio_url.lower().split("?")[0]
+                        ext = "wav" if url_path.endswith(".wav") else "mp3"
+                        tmp_audio = f"/tmp/cloud_tts.{ext}"
+                        with open(tmp_audio, "wb") as af:
+                            af.write(audio_bin.content)
+                        _play(tmp_audio, volume=volume)
+                        return True
+                if extracted_text:
                     speak(
                         text=extracted_text,
                         lang=lang,
@@ -275,11 +284,12 @@ def ocr_tts_worker(
         if cmd == "start":
             try:
                 pref_lang = get_preferred_lang()
-                language = (
-                    "english"
-                    if pref_lang == "en"
-                    else get_language()
-                )
+                if pref_lang == "en":
+                    language = "english"
+                elif pref_lang == "id":
+                    language = "indonesian"
+                else:
+                    language = get_language()
                 volume = get_volume()
                 speed = get_tts_speed()
                 speaker_queue.put("start_scan")

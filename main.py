@@ -29,7 +29,11 @@ from helper.led import setup_led, led_on, led_off
 from helper.limit_switch import setup_limit_switches, read_limit_sw1, read_limit_sw2
 from helper.motor import setup_motor, motor_worker, get_motor_direction
 from helper.ocr_tts import ocr_tts_worker
-from helper.cloud_client import start_cloud_client, send_state_update
+from helper.cloud_client import (
+    start_cloud_client,
+    send_state_update,
+    set_preferred_lang,
+)
 from helper.speak import volume_watcher
 from helper.speaker import setup_speaker, speaker_worker
 from helper.switch import setup_switches, read_sw1, read_sw2_language
@@ -292,6 +296,8 @@ def loop(pi: pigpio.pi) -> None:
         # ── Language switch ───────────────────────────────────────────────
         _language = read_sw2_language(pi)
         if _language != sw2_last:
+            if sw2_last is not False:
+                set_preferred_lang(None)
             logger.info(f"Language: {_language}")
             speaker_queue.put(f"language_{_language}")
         sw2_last = _language

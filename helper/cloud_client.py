@@ -6,8 +6,16 @@ import queue
 import logging
 import threading
 import subprocess
-import psutil
-import websocket
+
+try:
+    import psutil
+except ImportError:
+    psutil = None  # type: ignore
+
+try:
+    import websocket
+except ImportError:
+    websocket = None  # type: ignore
 
 from queues import motor_queue
 from helper.fan import fan_on
@@ -27,23 +35,48 @@ from helper.speak import (
 
 logger = logging.getLogger(__name__)
 
+
+def load_dotenv_file() -> None:
+    """Load key=value pairs from .env in project root without requiring python-dotenv."""
+    env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env"))
+    if not os.path.isfile(env_path):
+        return
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip("'").strip('"')
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except Exception as e:
+        logger.warning(f"Failed to read .env file: {e}")
+
+
+load_dotenv_file()
+
 BACKEND_WS_URL = os.getenv("BACKEND_WS_URL", "ws://localhost:3001/ws")
 DEVICE_SERIAL = os.getenv("DEVICE_SERIAL", "SR-RPI4-001")
 DEVICE_API_KEY = os.getenv("DEVICE_API_KEY", "")
 
-_ws_client: websocket.WebSocketApp | None = None
+_ws_client = None
 _current_mode = "standby"
 _current_page = 1
-_preferred_lang = os.getenv("DEFAULT_LANG", "id")
+_preferred_lang: str | None = os.getenv("DEFAULT_LANG") or None
 
 
-def get_preferred_lang() -> str:
+def get_preferred_lang() -> str | None:
     return _preferred_lang
 
 
-def set_preferred_lang(lang: str) -> None:
+def set_preferred_lang(lang: str | None) -> None:
     global _preferred_lang
-    if lang in ("id", "en"):
+    if lang is None:
+        _preferred_lang = None
+    elif lang in ("id", "en"):
         _preferred_lang = lang
         logger.info(f"Preferred OCR/TTS language set to: {_preferred_lang}")
 
@@ -54,6 +87,40 @@ def get_cpu_temp() -> float:
             return round(int(f.read().strip()) / 1000.0, 1)
     except Exception:
         return 45.0
+
+
+def _get_cpu_and_ram() -> tuple[int, int]:
+    if psutil is not None:
+        try:
+            return (
+                round(psutil.cpu_percent(interval=None)),
+                round(psutil.virtual_memory().percent),
+            )
+        except Exception:
+            pass
+    # Pure-Linux /proc fallback for Raspberry Pi if psutil is not installed
+    cpu_load = 20
+    ram_pct = 40
+    try:
+        load1, _, _ = os.getloadavg()
+        cores = os.cpu_count() or 4
+        cpu_load = max(0, min(100, round((load1 / cores) * 100)))
+    except Exception:
+        pass
+    try:
+        mem_total = 0
+        mem_avail = 0
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    mem_total = int(line.split()[1])
+                elif line.startswith("MemAvailable:"):
+                    mem_avail = int(line.split()[1])
+        if mem_total > 0:
+            ram_pct = max(0, min(100, round(((mem_total - mem_avail) / mem_total) * 100)))
+    except Exception:
+        pass
+    return cpu_load, ram_pct
 
 
 def send_state_update(mode: str | None = None, page: int | None = None) -> None:
@@ -82,11 +149,12 @@ def _telemetry_loop() -> None:
         if _ws_client and _ws_client.sock and _ws_client.sock.connected:
             speed_mult = 0.5 + (get_tts_speed() / 100.0)
             wpm = int(150 * speed_mult) if _current_mode == "reading" else 0
+            cpu_load, ram_usage = _get_cpu_and_ram()
             payload = {
                 "type": "telemetry",
                 "cpuTemp": get_cpu_temp(),
-                "cpuLoad": round(psutil.cpu_percent(interval=None)),
-                "ramUsage": round(psutil.virtual_memory().percent),
+                "cpuLoad": cpu_load,
+                "ramUsage": ram_usage,
                 "wpm": wpm,
                 "ts": int(time.time() * 1000),
             }
@@ -251,6 +319,12 @@ def _handle_command(cmd: dict, pi, speaker_queue: queue.Queue) -> None:
 
 def start_cloud_client(pi, speaker_queue: queue.Queue) -> None:
     global _ws_client
+    if websocket is None:
+        logger.warning(
+            "'websocket-client' package not installed — Cloud WebSocket disabled. "
+            "Install on Raspberry Pi with: pip install websocket-client psutil"
+        )
+        return
     if not DEVICE_API_KEY:
         logger.warning("DEVICE_API_KEY not set — Cloud WebSocket client disabled")
         return
