@@ -86,6 +86,13 @@ def print_help():
 ==================================================================
 """)
 
+def pulse_input(pi: FakePi, pin: int, duration: float = 0.2) -> None:
+    pi.sim_set_input(pin, fakes.LOW)
+    def _release():
+        time.sleep(duration)
+        pi.sim_set_input(pin, fakes.HIGH)
+    threading.Thread(target=_release, daemon=True).start()
+
 def run_interactive_cli(pi: FakePi):
     time.sleep(1.0)
     print_help()
@@ -102,10 +109,7 @@ def run_interactive_cli(pi: FakePi):
 
             if cmd in ("s", ""):
                 logger.info("👉 [TOMBOL FISIK] Menekan BTN5 (Start Scan)...")
-                # Trigger BTN5 press
-                pi.sim_set_input(BTN5, fakes.LOW)
-                time.sleep(0.06)
-                pi.sim_set_input(BTN5, fakes.HIGH)
+                pulse_input(pi, BTN5, duration=0.1)
 
             elif cmd == "1":
                 sw1_state = not sw1_state
@@ -141,15 +145,11 @@ def run_interactive_cli(pi: FakePi):
 
             elif cmd == "h":
                 logger.info("👉 [LIMIT SWITCH] Menekan LIMIT_SW1 (Home position)...")
-                pi.sim_set_input(LIMIT_SW1, fakes.LOW)
-                time.sleep(0.1)
-                pi.sim_set_input(LIMIT_SW1, fakes.HIGH)
+                pulse_input(pi, LIMIT_SW1, duration=0.2)
 
             elif cmd == "f":
                 logger.info("👉 [LIMIT SWITCH] Menekan LIMIT_SW2 (Pembalikan halaman selesai)...")
-                pi.sim_set_input(LIMIT_SW2, fakes.LOW)
-                time.sleep(0.1)
-                pi.sim_set_input(LIMIT_SW2, fakes.HIGH)
+                pulse_input(pi, LIMIT_SW2, duration=0.2)
 
             elif cmd == "?":
                 print_help()

@@ -156,6 +156,13 @@ class FakePi:
         if running:
             label = "MAJU (forward)" if direction == "forward" else "MUNDUR (backward)"
             log.info("⚙️  [MOTOR ENB GPIO%s] BERGERAK %s — PWM %s/255", _pin("ENB"), label, duty)
+            # Physical switch mechanical interlock:
+            # When motor moves forward, arm leaves LIMIT_SW1 (home switch releases)
+            if direction == "forward":
+                self._levels[_pin("LIMIT_SW1")] = HIGH
+            # When motor moves backward, arm leaves LIMIT_SW2 (flip switch releases)
+            elif direction == "backward":
+                self._levels[_pin("LIMIT_SW2")] = HIGH
         else:
             log.info("⚙️  [MOTOR ENB GPIO%s] BERHENTI", _pin("ENB"))
 
