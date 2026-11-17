@@ -69,7 +69,7 @@ def send_state_update(mode: str | None = None, page: int | None = None) -> None:
             "mode": _current_mode,
             "page": _current_page,
             "volume": get_volume(),
-            "speed": round(round((0.5 + (get_tts_speed() / 100.0) * 1.5) * 20) / 20, 2),
+            "speed": round(0.5 + (get_tts_speed() / 100.0), 2),
         }
         try:
             _ws_client.send(json.dumps(payload))
@@ -80,7 +80,7 @@ def send_state_update(mode: str | None = None, page: int | None = None) -> None:
 def _telemetry_loop() -> None:
     while True:
         if _ws_client and _ws_client.sock and _ws_client.sock.connected:
-            speed_mult = 0.5 + (get_tts_speed() / 100.0) * 1.5
+            speed_mult = 0.5 + (get_tts_speed() / 100.0)
             wpm = int(150 * speed_mult) if _current_mode == "reading" else 0
             payload = {
                 "type": "telemetry",
@@ -110,12 +110,12 @@ def _handle_command(cmd: dict, pi, speaker_queue: queue.Queue) -> None:
     elif cmd_type in ("tts_speed", "speed"):
         raw_val = float(cmd.get("value", 1.0))
         if raw_val <= 5.0:
-            # Multiplier (e.g. 0.5 .. 2.0 from DeviceControls or SessionConfigModal)
+            # Multiplier (e.g. 0.5 .. 1.5 from DeviceControls or SessionConfigModal)
             mult = raw_val
         else:
             # WPM (e.g. 150 WPM = 1.0x)
             mult = raw_val / 150.0
-        pct = max(0, min(100, round(((mult - 0.5) / 1.5) * 100)))
+        pct = max(0, min(100, round((mult - 0.5) * 100)))
         set_encoder_speed(pct)
         send_state_update()
 
