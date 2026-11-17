@@ -29,7 +29,7 @@ from helper.led import setup_led, led_on, led_off
 from helper.limit_switch import setup_limit_switches, read_limit_sw1, read_limit_sw2
 from helper.motor import setup_motor, motor_worker, get_motor_direction
 from helper.ocr_tts import ocr_tts_worker
-from helper.cloud_client import start_cloud_client
+from helper.cloud_client import start_cloud_client, send_state_update
 from helper.speak import volume_watcher
 from helper.speaker import setup_speaker, speaker_worker
 from helper.switch import setup_switches, read_sw1, read_sw2_language
@@ -286,6 +286,7 @@ def loop(pi: pigpio.pi) -> None:
             else:
                 motor_queue.put("stop")
                 speaker_queue.put("shutdown")
+                send_state_update(mode="off")
         sw1_last = sw1
 
         # ── Language switch ───────────────────────────────────────────────
@@ -303,12 +304,14 @@ def loop(pi: pigpio.pi) -> None:
                 _homing_purpose = None
                 motor_queue.put("stop")
                 speaker_queue.put("place_book")
+                send_state_update(mode="standby")
 
             elif _homing_purpose == "shutdown":
                 logger.info("Shutdown homing complete")
                 _homing_purpose = None
                 motor_queue.put("stop")
                 speaker_queue.put("shutdown")
+                send_state_update(mode="off")
 
             elif _resetting:
                 logger.info("Reset complete")
@@ -318,6 +321,7 @@ def loop(pi: pigpio.pi) -> None:
                 motor_queue.put("stop")
                 speaker_queue.put("reset_success")
                 set_page_seen(False)
+                send_state_update(mode="standby")
 
             elif _motor_running and get_motor_direction() == "backward":
                 logger.info("Limit SW1: pressed — stop + OCR")

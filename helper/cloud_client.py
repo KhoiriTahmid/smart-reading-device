@@ -169,12 +169,84 @@ def _handle_command(cmd: dict, pi, speaker_queue: queue.Queue) -> None:
 
     elif cmd_type == "power":
         mode = cmd.get("mode")
-        if mode == "restart":
-            send_state_update(mode="restarting")
-            subprocess.Popen(["sudo", "reboot"])
+        from helper.limit_switch import read_limit_sw1
+        from helper.led import led_on, led_off
+        from helper.fan import fan_off
+        from helper.motor import get_motor_direction
+        from queues import ocr_queue
+
+        if mode == "on":
+            for mod_name in ("main", "__main__"):
+                mod = sys.modules.get(mod_name)
+                if mod is not None:
+                    if hasattr(mod, "_motor_running"):
+                        setattr(mod, "_motor_running", True)
+                    if hasattr(mod, "_resetting"):
+                        setattr(mod, "_resetting", False)
+                    if hasattr(mod, "_homing_purpose"):
+                        setattr(mod, "_homing_purpose", None)
+                    if hasattr(mod, "_cancel_scan"):
+                        getattr(mod, "_cancel_scan").clear()
+            if not read_limit_sw1(pi):
+                send_state_update(mode="restarting")
+                motor_queue.put("backward")
+            else:
+                send_state_update(mode="standby")
+                motor_queue.put("stop")
+                led_on(pi)
+                ocr_queue.put("start")
+
+        elif mode == "restart":
+            stop_playback()
+            fan_off(pi)
+            led_off(pi)
+            for mod_name in ("main", "__main__"):
+                mod = sys.modules.get(mod_name)
+                if mod is not None:
+                    if hasattr(mod, "_cancel_scan"):
+                        getattr(mod, "_cancel_scan").set()
+                    if hasattr(mod, "_resetting"):
+                        setattr(mod, "_resetting", True)
+            speaker_queue.put("start_restart")
+            if read_limit_sw1(pi):
+                for mod_name in ("main", "__main__"):
+                    mod = sys.modules.get(mod_name)
+                    if mod is not None:
+                        if hasattr(mod, "_ready_to_start"):
+                            setattr(mod, "_ready_to_start", True)
+                        if hasattr(mod, "_resetting"):
+                            setattr(mod, "_resetting", False)
+                        if hasattr(mod, "_motor_running"):
+                            setattr(mod, "_motor_running", False)
+                motor_queue.put("stop")
+                speaker_queue.put("reset_success")
+                send_state_update(mode="standby", page=1)
+            else:
+                send_state_update(mode="restarting", page=1)
+                if get_motor_direction() == "backward":
+                    motor_queue.put("bounce")
+                motor_queue.put("backward")
+
         elif mode == "off":
-            send_state_update(mode="off")
-            subprocess.Popen(["sudo", "shutdown", "-h", "now"])
+            stop_playback()
+            fan_off(pi)
+            led_off(pi)
+            for mod_name in ("main", "__main__"):
+                mod = sys.modules.get(mod_name)
+                if mod is not None:
+                    if hasattr(mod, "_motor_running"):
+                        setattr(mod, "_motor_running", False)
+                    if hasattr(mod, "_cancel_scan"):
+                        getattr(mod, "_cancel_scan").set()
+                    if not read_limit_sw1(pi) and hasattr(mod, "_homing_purpose"):
+                        setattr(mod, "_homing_purpose", "shutdown")
+            if not read_limit_sw1(pi):
+                send_state_update(mode="off")
+                motor_queue.put("backward")
+            else:
+                motor_queue.put("stop")
+                speaker_queue.put("shutdown")
+                send_state_update(mode="off")
 
 
 def start_cloud_client(pi, speaker_queue: queue.Queue) -> None:
