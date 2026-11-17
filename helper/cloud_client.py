@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import queue
@@ -8,6 +9,8 @@ import subprocess
 import psutil
 import websocket
 
+from queues import motor_queue
+from helper.fan import fan_on
 from helper.encoder import (
     get_volume,
     get_tts_speed,
@@ -66,7 +69,7 @@ def send_state_update(mode: str | None = None, page: int | None = None) -> None:
             "mode": _current_mode,
             "page": _current_page,
             "volume": get_volume(),
-            "speed": round(0.5 + (get_tts_speed() / 100.0) * 1.5, 2),
+            "speed": round(round((0.5 + (get_tts_speed() / 100.0) * 1.5) * 20) / 20, 2),
         }
         try:
             _ws_client.send(json.dumps(payload))
@@ -104,16 +107,15 @@ def _handle_command(cmd: dict, pi, speaker_queue: queue.Queue) -> None:
         set_volume(val)
         send_state_update()
 
-    elif cmd_type == "tts_speed":
-        wpm = int(cmd.get("value", 150))
-        pct = max(0, min(100, int(((wpm - 80) / 160.0) * 100)))
-        set_encoder_speed(pct)
-        send_state_update()
-
-    elif cmd_type == "speed":
-        # Direct multiplier from pre-session modal (e.g. 0.75, 1.0, 1.25, 1.5)
-        mult = float(cmd.get("value", 1.0))
-        pct = max(0, min(100, int(((mult - 0.5) / 1.5) * 100)))
+    elif cmd_type in ("tts_speed", "speed"):
+        raw_val = float(cmd.get("value", 1.0))
+        if raw_val <= 5.0:
+            # Multiplier (e.g. 0.5 .. 2.0 from DeviceControls or SessionConfigModal)
+            mult = raw_val
+        else:
+            # WPM (e.g. 150 WPM = 1.0x)
+            mult = raw_val / 150.0
+        pct = max(0, min(100, round(((mult - 0.5) / 1.5) * 100)))
         set_encoder_speed(pct)
         send_state_update()
 
@@ -123,14 +125,18 @@ def _handle_command(cmd: dict, pi, speaker_queue: queue.Queue) -> None:
 
     elif cmd_type == "flip":
         step = int(cmd.get("step", 1))
+        if step < 1:
+            logger.warning("Backward page flip is not supported by hardware; ignoring.")
+            return
+        stop_playback()
+        for mod_name in ("main", "__main__"):
+            mod = sys.modules.get(mod_name)
+            if mod is not None and hasattr(mod, "_motor_running"):
+                setattr(mod, "_motor_running", True)
         send_state_update(mode="flipping", page=max(1, _current_page + step))
         try:
-            from helper.motor import flip_page
-            threading.Thread(
-                target=flip_page,
-                args=(pi, speaker_queue),
-                daemon=True,
-            ).start()
+            fan_on(pi)
+            motor_queue.put("forward")
         except Exception:
             logger.exception("Failed to trigger motor flip")
 
