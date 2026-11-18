@@ -33,6 +33,22 @@ def turn_on_fan(pi: pigpio.pi):
     fan_on(pi)
 
 
+def _detect_audio_ext(content: bytes, url: str) -> str | None:
+    """Detect whether downloaded bytes are WAV or MP3; return None if invalid/HTML/XML."""
+    if not content or len(content) <= 100:
+        return None
+    head = content[:16].lstrip()
+    if head.startswith(b"<") or head.startswith(b"{"):
+        # S3 XML/JSON/HTML error response — never feed to aplay/mpg123
+        return None
+    if content[:4] == b"RIFF" and content[8:12] == b"WAVE":
+        return "wav"
+    if content[:3] == b"ID3" or (content[0] == 0xFF and (content[1] & 0xE0) == 0xE0):
+        return "mp3"
+    url_path = url.lower().split("?")[0]
+    return "wav" if url_path.endswith(".wav") else "mp3"
+
+
 def prepare_pages_as_pdf(
     usb_path: str | None,
     picam_path: str | None,
@@ -166,18 +182,29 @@ def process_via_cloud(
 
                         played_cloud_audio = False
                         if page_audio_url:
-                            logger.info(
-                                f"Playing cloud TTS audio for Page {page_num}"
-                            )
-                            audio_bin = requests.get(page_audio_url, timeout=20)
-                            if audio_bin.ok and len(audio_bin.content) > 100:
-                                url_path = page_audio_url.lower().split("?")[0]
-                                ext = "wav" if url_path.endswith(".wav") else "mp3"
-                                tmp_audio = f"/tmp/cloud_tts_p{page_num}.{ext}"
-                                with open(tmp_audio, "wb") as af:
-                                    af.write(audio_bin.content)
-                                _play(tmp_audio, volume=volume)
-                                played_cloud_audio = True
+                            try:
+                                logger.info(
+                                    f"Downloading cloud TTS audio for Page {page_num}"
+                                )
+                                audio_bin = requests.get(page_audio_url, timeout=20)
+                                ext = (
+                                    _detect_audio_ext(audio_bin.content, page_audio_url)
+                                    if audio_bin.ok
+                                    else None
+                                )
+                                if ext:
+                                    tmp_audio = f"/tmp/cloud_tts_p{page_num}.{ext}"
+                                    with open(tmp_audio, "wb") as af:
+                                        af.write(audio_bin.content)
+                                    logger.info(
+                                        f"Playing cloud TTS audio for Page {page_num} ({len(audio_bin.content)} bytes)"
+                                    )
+                                    _play(tmp_audio, volume=volume)
+                                    played_cloud_audio = True
+                            except Exception as dl_err:
+                                logger.warning(
+                                    f"Cloud audio download failed for Page {page_num}: {dl_err}"
+                                )
 
                         if not played_cloud_audio and page_text:
                             logger.info(
@@ -196,15 +223,21 @@ def process_via_cloud(
                 audio_url = status_data.get("audioUrl")
                 extracted_text = status_data.get("extractedText", "")
                 if audio_url:
-                    audio_bin = requests.get(audio_url, timeout=20)
-                    if audio_bin.ok and len(audio_bin.content) > 100:
-                        url_path = audio_url.lower().split("?")[0]
-                        ext = "wav" if url_path.endswith(".wav") else "mp3"
-                        tmp_audio = f"/tmp/cloud_tts.{ext}"
-                        with open(tmp_audio, "wb") as af:
-                            af.write(audio_bin.content)
-                        _play(tmp_audio, volume=volume)
-                        return True
+                    try:
+                        audio_bin = requests.get(audio_url, timeout=20)
+                        ext = (
+                            _detect_audio_ext(audio_bin.content, audio_url)
+                            if audio_bin.ok
+                            else None
+                        )
+                        if ext:
+                            tmp_audio = f"/tmp/cloud_tts.{ext}"
+                            with open(tmp_audio, "wb") as af:
+                                af.write(audio_bin.content)
+                            _play(tmp_audio, volume=volume)
+                            return True
+                    except Exception as dl_err:
+                        logger.warning(f"Cloud fallback audio download failed: {dl_err}")
                 if extracted_text:
                     speak(
                         text=extracted_text,

@@ -60,9 +60,27 @@ ALSA_CONTROL = "PCM"
 ALSA_DEVICE = "plughw:CARD=Headphones,DEV=0"
 
 PCM_MIN_DB = -30.0
-PCM_MAX_DB = 4.0
+PCM_MAX_DB = 0.0
 
 _last_set_volume: int | None = None  # track last applied volume to avoid redundant amixer calls
+_active_audio_count = 0
+_active_audio_lock = threading.Lock()
+
+
+def mark_audio_active(active: bool) -> None:
+    global _active_audio_count
+    with _active_audio_lock:
+        if active:
+            _active_audio_count += 1
+        else:
+            _active_audio_count = max(0, _active_audio_count - 1)
+
+
+def is_audio_playing() -> bool:
+    with _active_audio_lock:
+        if _active_audio_count > 0:
+            return True
+    return _play_process is not None and _play_process.poll() is None
 
 
 def set_volume(volume: int):
@@ -87,14 +105,32 @@ def set_volume(volume: int):
         logger.exception("set_volume: failed")
 
 
+def _estimate_duration_fallback(filepath: str, ext: str, min_timeout: int) -> float:
+    try:
+        size_bytes = os.path.getsize(filepath)
+        if ext == "mp3":
+            # Edge-TTS MP3 is 48 kbps (6000 bytes/sec)
+            est = (size_bytes * 8) / 48_000
+            return max(min_timeout, est + 15)
+        elif ext == "wav":
+            # 22050 Hz 16-bit mono WAV is ~44100 bytes/sec
+            est = size_bytes / 44_100
+            return max(min_timeout, est + 15)
+    except Exception:
+        pass
+    return max(min_timeout, 120)
+
+
 def _play(filepath: str, volume: int = 50, min_timeout: int = 15) -> None:
     global _play_process
 
     ext = filepath.rsplit(".", 1)[-1].lower()
+    volume = max(0, min(100, volume))
+    scale = int(volume / 100 * 32768)
 
     player_map = {
         "wav": ["aplay",  "-q", "-D", ALSA_DEVICE, filepath],
-        "mp3": ["mpg123", "-q", "-o", "alsa", "-a", ALSA_DEVICE, filepath],
+        "mp3": ["mpg123", "-q", "--scale", str(scale), "-o", "alsa", "-a", ALSA_DEVICE, filepath],
     }
 
     cmd = player_map.get(ext)
@@ -102,11 +138,12 @@ def _play(filepath: str, volume: int = 50, min_timeout: int = 15) -> None:
         logger.error(f"_play: unsupported extension '.{ext}'")
         return
 
-    set_volume(volume)
+    if not is_audio_playing():
+        set_volume(volume)
 
     # Estimate playback duration from the actual audio file, so long
     # TTS clips don't get cut off by a fixed timeout.
-    timeout = min_timeout
+    timeout = float(min_timeout)
     try:
         result = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
@@ -115,9 +152,10 @@ def _play(filepath: str, volume: int = 50, min_timeout: int = 15) -> None:
         )
         duration = float(result.stdout.strip())
         timeout = max(min_timeout, duration + 10)  # +10s buffer
-    except Exception as e:
-        logger.warning(f"_play: could not probe duration, using default timeout: {e}")
+    except Exception:
+        timeout = _estimate_duration_fallback(filepath, ext, min_timeout)
 
+    mark_audio_active(True)
     try:
         with _play_lock:
             if _play_process is not None and _play_process.poll() is None:
@@ -143,6 +181,7 @@ def _play(filepath: str, volume: int = 50, min_timeout: int = 15) -> None:
     finally:
         with _play_lock:
             _play_process = None
+        mark_audio_active(False)
 
 
 def _get_piper_voice(lang: str) -> PiperVoice | None:
@@ -195,10 +234,24 @@ def speak(*, text: str, lang: str, speaker_queue: queue.Queue, volume: int = 80,
 
 
 def volume_watcher(get_volume, interval: float = 0.2) -> None:
+    """
+    Syncs system volume to the volume knob, but SKIPS applying amixer
+    changes while audio is actively playing, to avoid hardware gain
+    changes corrupting the live stream (causes static/pitch distortion).
+    The pending volume gets applied as soon as playback finishes.
+    """
     last_volume = None
+    pending_volume = None
+
     while True:
         volume = get_volume()
+
         if volume != last_volume:
-            set_volume(volume)
-            last_volume = volume
+            pending_volume = volume
+
+        if pending_volume is not None and not is_audio_playing():
+            set_volume(pending_volume)
+            last_volume = pending_volume
+            pending_volume = None
+
         time.sleep(interval)

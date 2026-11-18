@@ -4,6 +4,7 @@ import queue
 import subprocess
 
 from helper.encoder import get_volume
+from helper.speak import _play_lock, mark_audio_active
 
 logger = logging.getLogger(__name__)
 
@@ -50,18 +51,22 @@ def setup_speaker() -> None:
 
 def _play_sound(path: str, volume: int) -> None:
     ext   = path.rsplit(".", 1)[-1].lower()
-    scale = int(volume / 100 * 32768)
+    scale = int(max(0, min(100, volume)) / 100 * 32768)
     cmd = (
         ["mpg123", "-q", "--scale", str(scale), "-o", "alsa", "-a", ALSA_DEVICE, path]
         if ext == "mp3" else
         ["aplay",  "-q", "-D", ALSA_DEVICE, path]
     )
+    mark_audio_active(True)
     try:
-        subprocess.run(cmd, check=True, timeout=10)
+        with _play_lock:
+            subprocess.run(cmd, check=True, timeout=10)
     except subprocess.TimeoutExpired:
         logger.error(f"speaker: playback timed out for {path}")
     except Exception:
         logger.exception(f"speaker: playback failed for {path}")
+    finally:
+        mark_audio_active(False)
 
 
 def speaker_worker(speaker_queue: queue.Queue, get_language) -> None:
