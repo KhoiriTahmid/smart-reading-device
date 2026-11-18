@@ -45,48 +45,19 @@ def prepare_pages_as_pdf(
     """
     pil_pages: list[Image.Image] = []
 
-    # Page 1: Left Camera (USB Webcam)
+    # Page 1: Left Camera (USB Webcam) — full frame, rotated upright without cropping margins
     if usb_path and os.path.exists(usb_path):
         img_left = cv2.imread(usb_path)
         if img_left is not None:
             img_left = cv2.rotate(img_left, cv2.ROTATE_90_COUNTERCLOCKWISE)
-            h, w = img_left.shape[:2]
-            top = int(h * 0.13)
-            left = int(w * 0.25)
-            right = int(w * 0.90)
-            img_left = img_left[top:h, left:right]
             rgb_left = cv2.cvtColor(img_left, cv2.COLOR_BGR2RGB)
             pil_pages.append(Image.fromarray(rgb_left))
 
-    # Page 2: Right Camera (PiCam)
+    # Page 2: Right Camera (PiCam) — full frame, rotated upright without cropping margins
     if picam_path and os.path.exists(picam_path):
         img_right = cv2.imread(picam_path)
         if img_right is not None:
-            try:
-                h, w = img_right.shape[:2]
-                src_pts = np.float32(
-                    [
-                        [200, 0],
-                        [w - 50, 100],
-                        [w, h - 200],
-                        [0, h - 320],
-                    ]
-                )
-                dst_pts = np.float32(
-                    [
-                        [0, 0],
-                        [w, 0],
-                        [w, h],
-                        [0, h],
-                    ]
-                )
-                matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
-                img_right = cv2.warpPerspective(img_right, matrix, (w, h))
-                img_right = cv2.rotate(img_right, cv2.ROTATE_90_CLOCKWISE)
-                h, w = img_right.shape[:2]
-                img_right = img_right[0:h, 0 : int(w * 0.90)]
-            except Exception:
-                logger.warning("PiCam warp fallback to raw frame")
+            img_right = cv2.rotate(img_right, cv2.ROTATE_90_CLOCKWISE)
             rgb_right = cv2.cvtColor(img_right, cv2.COLOR_BGR2RGB)
             pil_pages.append(Image.fromarray(rgb_right))
 
