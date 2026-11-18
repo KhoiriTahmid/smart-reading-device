@@ -34,7 +34,7 @@ from helper.cloud_client import (
     send_state_update,
     set_preferred_lang,
 )
-from helper.speak import volume_watcher
+from helper.speak import volume_watcher, stop_playback
 from helper.speaker import setup_speaker, speaker_worker
 from helper.switch import setup_switches, read_sw1, read_sw2_language
 from helper.ultrasonic import setup_ultrasonic, read_ultra1
@@ -272,9 +272,13 @@ def loop(pi: pigpio.pi) -> None:
         sw1 = read_sw1(pi)
         if sw1 and not sw1_last:
             _motor_running = True
+            _ready_to_start = False
+            _resetting = False
+            _homing_purpose = None
             logger.info("SW1: ON")
             if not read_limit_sw1(pi):
                 logger.info("Homing: moving backward to limit SW1")
+                send_state_update(mode="restarting")
                 motor_queue.put("backward")
             else:
                 run_ocr_tts(pi)
@@ -282,10 +286,16 @@ def loop(pi: pigpio.pi) -> None:
 
         elif not sw1 and sw1_last and _motor_running:
             _motor_running = False
+            _ready_to_start = False
+            _resetting = False
             _cancel_scan.set()
+            stop_playback()
+            fan_off(pi)
+            led_off(pi)
             logger.info("SW1: OFF — homing before shutdown")
             if not read_limit_sw1(pi):
                 _homing_purpose = "shutdown"
+                send_state_update(mode="off")
                 motor_queue.put("backward")
             else:
                 motor_queue.put("stop")

@@ -339,6 +339,7 @@ def ocr_tts_worker(
                         logger.warning("OCR: empty result on both pages")
                         speaker_queue.put("ocr_empty")
                         if not cancel_event.is_set():
+                            send_state_update(mode="flipping", page=capture_index)
                             motor_queue.put("forward")
                         turn_on_fan(pi)
                         continue
@@ -367,8 +368,8 @@ def ocr_tts_worker(
                     logger.info("OCR/TTS cancelled (SW1 off)")
                     continue
 
-                # ── 4. Advance motor & return to standby ─────────────────
-                send_state_update(mode="standby", page=capture_index)
+                # ── 4. Advance motor & flip to next page ─────────────────
+                send_state_update(mode="flipping", page=capture_index)
                 motor_queue.put("forward")
                 turn_on_fan(pi)
             except Exception:
@@ -376,3 +377,4 @@ def ocr_tts_worker(
                     "ocr_tts_worker: unhandled error during scan sequence"
                 )
                 speaker_queue.put("tts_failed")
+                send_state_update(mode="standby", page=capture_index)

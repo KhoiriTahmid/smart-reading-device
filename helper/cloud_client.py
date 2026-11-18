@@ -249,6 +249,8 @@ def _handle_command(cmd: dict, pi, speaker_queue: queue.Queue) -> None:
                 if mod is not None:
                     if hasattr(mod, "_motor_running"):
                         setattr(mod, "_motor_running", True)
+                    if hasattr(mod, "_ready_to_start"):
+                        setattr(mod, "_ready_to_start", False)
                     if hasattr(mod, "_resetting"):
                         setattr(mod, "_resetting", False)
                     if hasattr(mod, "_homing_purpose"):
@@ -259,7 +261,7 @@ def _handle_command(cmd: dict, pi, speaker_queue: queue.Queue) -> None:
                 send_state_update(mode="restarting")
                 motor_queue.put("backward")
             else:
-                send_state_update(mode="standby")
+                send_state_update(mode="reading")
                 motor_queue.put("stop")
                 led_on(pi)
                 ocr_queue.put("start")
@@ -335,6 +337,10 @@ def _handle_command(cmd: dict, pi, speaker_queue: queue.Queue) -> None:
                 if mod is not None:
                     if hasattr(mod, "_motor_running"):
                         setattr(mod, "_motor_running", False)
+                    if hasattr(mod, "_ready_to_start"):
+                        setattr(mod, "_ready_to_start", False)
+                    if hasattr(mod, "_resetting"):
+                        setattr(mod, "_resetting", False)
                     if hasattr(mod, "_cancel_scan"):
                         getattr(mod, "_cancel_scan").set()
                     if not read_limit_sw1(pi) and hasattr(mod, "_homing_purpose"):
