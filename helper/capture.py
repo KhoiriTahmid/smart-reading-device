@@ -1,6 +1,7 @@
 import logging
 import os
 import subprocess
+import time
 import cv2
 from picamera2 import Picamera2
 
@@ -83,22 +84,34 @@ def find_usb_camera(max_devices: int = 5) -> int:
 
 def capture_picamera(index: int) -> tuple[str | None, int]:
     output_path = os.path.join(IMAGES_DIR, f"capture_{index}.jpg")
-    try:
-        logger.info(f"Capturing Pi Camera → capture_{index}.jpg")
-        cam    = Picamera2()
-        config = cam.create_still_configuration(
-            main={"size": (1600, 1200)}   # turun dari 2592x1944 (5MP) ke ~2MP, cukup untuk OCR teks buku
-        )
-        cam.configure(config)
-        cam.start()
-        cam.capture_file(output_path)
-        cam.stop()
-        cam.close()
-        logger.info(f"Pi Camera done: {output_path}")
-        return output_path, index + 1
-    except Exception as e:
-        logger.error(f"capture_picamera: {e}", exc_info=True)
-        return None, index + 1
+    for attempt in range(1, 4):
+        cam = None
+        try:
+            logger.info(f"Capturing Pi Camera → capture_{index}.jpg")
+            cam    = Picamera2()
+            config = cam.create_still_configuration(
+                main={"size": (1600, 1200)}   # turun dari 2592x1944 (5MP) ke ~2MP, cukup untuk OCR teks buku
+            )
+            cam.configure(config)
+            cam.start()
+            cam.capture_file(output_path)
+            logger.info(f"Pi Camera done: {output_path}")
+            return output_path, index + 1
+        except Exception as e:
+            logger.error(f"capture_picamera (attempt {attempt}/3): {e}", exc_info=(attempt == 3))
+            if attempt < 3:
+                time.sleep(0.8)
+        finally:
+            if cam is not None:
+                try:
+                    cam.stop()
+                except Exception:
+                    pass
+                try:
+                    cam.close()
+                except Exception:
+                    pass
+    return None, index + 1
 
 
 def capture_usb(index: int) -> tuple[str | None, int]:
