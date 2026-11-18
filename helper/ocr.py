@@ -30,7 +30,30 @@ def run_ocr(
             raise FileNotFoundError(f"Image not found: {image_path}")
 
         # ==========================================
-        # Camera-specific rotation (full frame, no margin cropping)
+        # Perspective correction (PiCam only)
+        # ==========================================
+        if camera == "picam":
+            h, w = img.shape[:2]
+
+            src_pts = np.float32([
+                [200, 0],          # top-left
+                [w - 50, 100],     # top-right
+                [w, h - 200],      # bottom-right
+                [0, h - 320],      # bottom-left
+            ])
+
+            dst_pts = np.float32([
+                [0, 0],
+                [w, 0],
+                [w, h],
+                [0, h],
+            ])
+
+            matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
+            img = cv2.warpPerspective(img, matrix, (w, h))
+
+        # ==========================================
+        # Camera-specific rotation
         # ==========================================
         if camera == "picam":
             img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
@@ -41,7 +64,10 @@ def run_ocr(
         # ==========================================
         # OCR preprocessing
         # ==========================================
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        h, w = img.shape[:2]
+        cropped = img[0:h, 0:int(w * 0.90)]
+
+        gray = cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY)
 
         clahe = cv2.createCLAHE(
             clipLimit=2.0,
