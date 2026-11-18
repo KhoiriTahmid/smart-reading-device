@@ -265,35 +265,66 @@ def _handle_command(cmd: dict, pi, speaker_queue: queue.Queue) -> None:
                 ocr_queue.put("start")
 
         elif mode == "restart":
-            stop_playback()
-            fan_off(pi)
-            led_off(pi)
+            is_ready_to_start = False
+            is_resetting = False
             for mod_name in ("main", "__main__"):
                 mod = sys.modules.get(mod_name)
-                if mod is not None:
-                    if hasattr(mod, "_cancel_scan"):
-                        getattr(mod, "_cancel_scan").set()
-                    if hasattr(mod, "_resetting"):
-                        setattr(mod, "_resetting", True)
-            speaker_queue.put("start_restart")
-            if read_limit_sw1(pi):
+                if mod is not None and hasattr(mod, "_ready_to_start"):
+                    is_ready_to_start = bool(getattr(mod, "_ready_to_start"))
+                    is_resetting = bool(getattr(mod, "_resetting", False))
+                    break
+
+            if is_ready_to_start:
+                # 2nd click (same as physical BTN5 2nd click): start scan
+                logger.info("BTN5 (Web): start scan")
                 for mod_name in ("main", "__main__"):
                     mod = sys.modules.get(mod_name)
                     if mod is not None:
                         if hasattr(mod, "_ready_to_start"):
-                            setattr(mod, "_ready_to_start", True)
-                        if hasattr(mod, "_resetting"):
-                            setattr(mod, "_resetting", False)
+                            setattr(mod, "_ready_to_start", False)
                         if hasattr(mod, "_motor_running"):
-                            setattr(mod, "_motor_running", False)
+                            setattr(mod, "_motor_running", True)
+                        if hasattr(mod, "_cancel_scan"):
+                            getattr(mod, "_cancel_scan").clear()
                 motor_queue.put("stop")
-                speaker_queue.put("reset_success")
-                send_state_update(mode="standby", page=1)
-            else:
-                send_state_update(mode="restarting", page=1)
-                if get_motor_direction() == "backward":
-                    motor_queue.put("bounce")
-                motor_queue.put("backward")
+                led_on(pi)
+                ocr_queue.put("start")
+
+            elif not is_resetting:
+                # 1st click (same as physical BTN5 1st click): reset & home to LIMIT_SW1
+                logger.info("BTN5 (Web): reset")
+                stop_playback()
+                fan_off(pi)
+                led_off(pi)
+                for mod_name in ("main", "__main__"):
+                    mod = sys.modules.get(mod_name)
+                    if mod is not None:
+                        if hasattr(mod, "_cancel_scan"):
+                            getattr(mod, "_cancel_scan").set()
+                        if hasattr(mod, "_resetting"):
+                            setattr(mod, "_resetting", True)
+                speaker_queue.put("start_restart")
+                if read_limit_sw1(pi):
+                    logger.info("Reset complete (already at LIMIT_SW1)")
+                    for mod_name in ("main", "__main__"):
+                        mod = sys.modules.get(mod_name)
+                        if mod is not None:
+                            if hasattr(mod, "_ready_to_start"):
+                                setattr(mod, "_ready_to_start", True)
+                            if hasattr(mod, "_resetting"):
+                                setattr(mod, "_resetting", False)
+                            if hasattr(mod, "_motor_running"):
+                                setattr(mod, "_motor_running", False)
+                            if hasattr(mod, "set_page_seen"):
+                                mod.set_page_seen(False)
+                    motor_queue.put("stop")
+                    speaker_queue.put("reset_success")
+                    send_state_update(mode="standby", page=1)
+                else:
+                    send_state_update(mode="restarting", page=1)
+                    if get_motor_direction() == "backward":
+                        motor_queue.put("bounce")
+                    motor_queue.put("backward")
 
         elif mode == "off":
             stop_playback()
